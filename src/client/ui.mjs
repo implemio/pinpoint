@@ -45,7 +45,8 @@ const CSS = `
 .status { padding: 4px 8px; white-space: nowrap; color: var(--pp-accent); }
 .act { padding: 4px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; user-select: none; }
 .act:hover, .act.on { background: var(--pp-raised); }
-.act.small { padding: 4px 5px; color: var(--pp-muted); }
+.act.small { display: flex; align-items: center; padding: 4px 5px; color: var(--pp-muted); }
+.act svg { width: 13px; height: 13px; }
 .act.small:hover { color: var(--pp-text); }
 .sep { width: 1px; align-self: stretch; margin: 2px; background: var(--pp-line); }
 .note {
@@ -112,6 +113,17 @@ export function createUi() {
   const place = (box, el) => {
     const rect = el.getBoundingClientRect()
     Object.assign(box.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` })
+  }
+  /** Lucide's trash-2, drawn in the text's colour. */
+  const trashIcon = () => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    for (const [name, value] of Object.entries({ 'viewBox': '0 0 24 24', 'fill': 'none', 'stroke': 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(name, value)
+    for (const d of ['M3 6h18', 'M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6', 'M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2', 'M10 11v6', 'M14 11v6']) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      path.setAttribute('d', d)
+      svg.append(path)
+    }
+    return svg
   }
   const clampLeft = (left, width) => Math.min(Math.max(8, left), Math.max(8, innerWidth - width - 8))
 
@@ -221,6 +233,7 @@ export function createUi() {
           return noteArea
         }
         const button = actable(node('span', ['act', part.on ? 'on' : '', part.small ? 'small' : ''].filter(Boolean).join(' '), part.text), part.act)
+        if (part.icon === 'trash') button.append(trashIcon())
         if (part.title) {
           button.title = part.title
           button.setAttribute('aria-label', part.title)

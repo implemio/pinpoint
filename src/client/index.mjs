@@ -351,8 +351,8 @@ export function start(options = {}) {
       ...(() => {
         const entry = noteFor(shown.infos)
         if (!entry) return [{ act: 'note', text: 'Note' }]
-        // A KEPT NOTE IS CLEARED BY HAND with the small x before it, its marks going with it.
-        return [{ act: 'drop-note', text: '×', small: true, title: 'Clear this note' }, { act: 'note', text: entry.sent ? 'Edit note' : 'Resume note', on: !entry.sent }]
+        // A KEPT NOTE IS CLEARED BY HAND with the small bin before it (an x already closes the bar), its marks going with it.
+        return [{ act: 'drop-note', icon: 'trash', small: true, title: 'Clear this note' }, { act: 'note', text: entry.sent ? 'Edit note' : 'Resume note', on: !entry.sent }]
       })(),
       { act: 'shot', text: 'Screenshot' },
       ...(canOpen ? [{ act: 'open', text: 'Go to', title: 'Open the first source line in your editor' }] : []),
