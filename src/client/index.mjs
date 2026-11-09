@@ -382,12 +382,20 @@ export function start(options = {}) {
     }
   }
 
+  /**
+   * A KEY BESIDE THE MODIFIERS IS A SHORTCUT, NOT A PICK (Ctrl+Shift+Z, Cmd+Shift+P): the outline stays hidden until
+   * the pointer moves again, so a shortcut never flashes it.
+   */
+  let shortcut = false
+  const MODIFIERS = ['Shift', 'Control', 'Meta', 'Alt', 'AltGraph', 'CapsLock']
+
   function follow(event) {
     if (!armed(event)) {
       ui.hover(null)
       if (batch.length) endBatch()
       return
     }
+    if (shortcut) return ui.hover(null)
     const el = document.elementFromPoint(pointer.x, pointer.y)
     if (!el || ui.owns(el)) return ui.hover(null)
     ui.hover(el, Date.now() < labelHeldUntil ? undefined : labelOf(el))
@@ -395,6 +403,7 @@ export function start(options = {}) {
 
   window.addEventListener('pointermove', (event) => {
     pointer = { x: event.clientX, y: event.clientY }
+    shortcut = false
     if (ui.owns(event.target)) holdBar()
     follow(event)
   }, { capture: true, passive: true })
@@ -405,6 +414,7 @@ export function start(options = {}) {
       stop(event)
       return closeBar()
     }
+    if (!MODIFIERS.includes(event.key)) shortcut = true
     follow(event)
   }, { capture: true })
 
