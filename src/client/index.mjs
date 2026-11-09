@@ -15,7 +15,7 @@ export const defaults = Object.freeze({
   skip: ['node_modules/'],
   /** The trail of components stops at the first whose file matches (a Nuxt page or layout). */
   stopAt: '(^|/)(pages|layouts)/',
-  /** The bar after a pick: Note, Screenshot, Open in editor, Details. */
+  /** The bar after a pick: Note, Screenshot, Go to, Details. */
   bar: true,
   /** How long the bar stays while nothing happens on it, in milliseconds. */
   barTimeout: 8000,
