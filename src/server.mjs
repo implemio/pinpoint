@@ -67,6 +67,9 @@ async function openFile(full, line, column) {
       setTimeout(() => done({ ok: true }), 1500)
     })
   }
+  // ON WINDOWS THE COMMAND RUNS THROUGH cmd.exe (`code` is a .cmd there), which reads these as its own: a file named
+  // with one is not opened, rather than handed to the shell.
+  if (process.platform === 'win32' && /[&|<>^%!"()]/.test(full)) return { ok: false, error: 'its path holds a character the Windows shell reads' }
   const args = ['-r', '-g', `${full}:${line}:${column}`]
   const first = await run(editor, args, process.env)
   if (first.ok) return first

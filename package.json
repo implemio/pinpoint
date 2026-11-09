@@ -1,6 +1,6 @@
 {
   "name": "@implemio/pinpoint",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Point at an element in a Vue or Nuxt dev server and copy where it is written: the page, the element and the .vue lines that draw it, ready to paste or for an agent to read over MCP.",
   "type": "module",
   "license": "MIT",

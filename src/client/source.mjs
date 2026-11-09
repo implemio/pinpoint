@@ -105,7 +105,9 @@ const PLUMBING = new Set(['Primitive', 'Slot', 'Fragment', 'BaseTransition', 'Tr
 export function partOf(el) {
   const slotted = el.closest('[data-slot]')
   if (!slotted) return null
-  let owner = slotted.__vueParentComponent
+  // THE TEMPLATE THAT WROTE IT (`vnode.ctx`, the instance rendering when the vnode was made), not the component it is
+  // mounted inside: a hero's title passed through its container's slot is the hero's part.
+  let owner = slotted.__vnode?.ctx ?? slotted.__vueParentComponent
   while (owner && PLUMBING.has(componentName(owner))) owner = owner.parent
   return { slot: slotted.getAttribute('data-slot'), owner: owner ? componentName(owner) : null }
 }
@@ -173,11 +175,10 @@ export function lookOf(el) {
   const style = getComputedStyle(el)
   const rect = el.getBoundingClientRect()
   const ground = groundOf(el)
-  const own = rgba(style.backgroundColor)
   const parts = [
     `${Math.round(rect.width)}×${Math.round(rect.height)}`,
     `${style.fontFamily.split(',')[0].replace(/['"]/g, '').trim()} ${style.fontSize}/${style.lineHeight} ${style.fontWeight}`,
-    `${hex(rgba(style.color))} on ${hex(ground)}${own[3] > 0.05 ? '' : ' (behind it)'}`,
+    `${hex(rgba(style.color))} on ${hex(ground)}`,
   ]
   if (/flex|grid/.test(style.display)) parts.push(`${style.display}${style.flexDirection === 'column' ? ' column' : ''}${style.gap && style.gap !== 'normal' && style.gap !== '0px' ? ` gap ${style.gap}` : ''}`)
   const padding = box(style, 'padding')
