@@ -96,13 +96,48 @@ function groundOf(el) {
   return '#ffffff'
 }
 
+/**
+ * THE EMPTY ROWS UNDER WHAT WAS DRAWN, cut off, never above the element's own height. A heading set solid (its line
+ * height its font size) has glyphs past its box, which the copy drawn for the picture lays out a little lower, so it
+ * is drawn with room under it and the room taken off again here.
+ */
+function trimmed(canvas, least, pad) {
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  const { width, height } = canvas
+  if (height <= least) return canvas
+  const rows = context.getImageData(0, least, width, height - least).data
+  const [r, g, b] = context.getImageData(0, height - 1, 1, 1).data
+  let last = -1
+  for (let y = height - least - 1; y >= 0 && last < 0; y--) {
+    for (let x = 0; x < width; x++) {
+      const at = (y * width + x) * 4
+      if (Math.abs(rows[at] - r) > 12 || Math.abs(rows[at + 1] - g) > 12 || Math.abs(rows[at + 2] - b) > 12) {
+        last = y
+        break
+      }
+    }
+  }
+  const keep = Math.min(height, Math.max(least, least + last + 1 + pad))
+  if (keep === height) return canvas
+  const out = document.createElement('canvas')
+  out.width = width
+  out.height = keep
+  out.getContext('2d').drawImage(canvas, 0, 0)
+  return out
+}
+
 /** One PNG of the picked elements, stacked and numbered when there are several. */
 async function shoot(elements) {
   const { domToCanvas } = await import('modern-screenshot')
   const scale = Math.min(2, window.devicePixelRatio || 1)
   const filter = node => !(node instanceof Element && node.hasAttribute('data-pinpoint'))
   const shots = []
-  for (const el of elements) shots.push(await domToCanvas(el, { scale, filter, backgroundColor: groundOf(el) }))
+  for (const el of elements) {
+    const { height } = el.getBoundingClientRect()
+    const room = Math.min(160, Math.max(24, height * 0.5))
+    const drawn = await domToCanvas(el, { scale, filter, backgroundColor: groundOf(el), height: height + room })
+    shots.push(trimmed(drawn, Math.round(height * scale), Math.round(6 * scale)))
+  }
   let canvas = shots[0]
   if (shots.length > 1) {
     const gap = Math.round(12 * scale)

@@ -88,15 +88,42 @@ function messagesOf(el) {
   return null
 }
 
+// A MESSAGE MAY BE PRECOMPILED (@intlify's AST, which Nuxt i18n ships): a resource node (`type` 0) whose `loc.source`
+// is the message as written, in dev; else its body put back together, from the long keys or the minified ones
+// (`t`, `b`, `s`, `i`, `c`, `v`, `k`). Node types: 1 plural, 2 message, 3 text, 4 named, 5 list, 9 literal.
+const typeOf = node => node?.type ?? node?.t
+const isResource = value => value && typeof value === 'object' && typeOf(value) === 0 && ('body' in value || 'b' in value)
+
+function bodySource(body) {
+  if (!body) return undefined
+  if (typeOf(body) === 1) return (body.cases ?? body.c ?? []).map(bodySource).join(' | ')
+  const fixed = body.static ?? body.s
+  if (typeof fixed === 'string') return fixed
+  return (body.items ?? body.i ?? []).map((item) => {
+    const type = typeOf(item)
+    if (type === 3 || type === 9) return item.value ?? item.v ?? ''
+    if (type === 4 || type === 5) return `{${item.key ?? item.k}}`
+    return ''
+  }).join('')
+}
+
+function messageSource(value) {
+  if (typeof value === 'string') return value
+  if (typeof value === 'function') return value.source ?? value.loc?.source
+  if (isResource(value)) return typeof value.loc?.source === 'string' ? value.loc.source : bodySource(value.body ?? value.b)
+  return undefined
+}
+
 function flatten(messages, prefix, out) {
   for (const [key, value] of Object.entries(messages)) {
     const path = prefix ? `${prefix}.${key}` : key
-    if (typeof value === 'string') out.push([path, value])
-    else if (typeof value === 'function') {
-      const source = value.source ?? value.loc?.source
+    if (typeof value === 'string' || typeof value === 'function' || isResource(value)) {
+      const source = messageSource(value)
       if (typeof source === 'string') out.push([path, source])
     }
-    else if (value && typeof value === 'object') flatten(value, path, out)
+    else if (value && typeof value === 'object') {
+      flatten(value, path, out)
+    }
   }
   return out
 }
@@ -105,7 +132,8 @@ const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * Up to three keys whose message reads as the element's words, exact matches first: each plural form tried on its
- * own, a placeholder (`{count}`) matching any words, a literal (`{'@'}`) as itself.
+ * own, a placeholder (`{count}`) matching any words, a literal (`{'@'}`) as itself. A form whose own words are under
+ * 40% of the element's (`{name}` alone matches anything) is no match.
  */
 export function i18nKeys(el) {
   const words = wordsOf(el)
@@ -122,7 +150,10 @@ export function i18nKeys(el) {
         exact.push(key)
         break
       }
-      if (text.includes('{') && new RegExp(`^${text.split(/\{[^}]*\}/).map(escape).join('.+?')}$`).test(words)) {
+      if (!text.includes('{')) continue
+      const fixed = text.split(/\{[^}]*\}/)
+      if (fixed.join('').trim().length < Math.max(3, words.length * 0.4)) continue
+      if (new RegExp(`^${fixed.map(escape).join('.+?')}$`).test(words)) {
         patterned.push(key)
         break
       }
