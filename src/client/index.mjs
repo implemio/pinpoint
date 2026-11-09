@@ -1,8 +1,9 @@
-// THE PICKER: hold the keys (Ctrl+Shift, Cmd+Shift on a Mac) and an outline follows the pointer; click to pick the
-// element, click more to pick several, and let go. What was picked is on the clipboard at every click, wrapped in
-// one tag so it reads apart from the words around it, and kept by the dev server for an agent to read over MCP.
-// The bar that opens then adds a note, a screenshot or opens the first line in the editor.
-import { described, i18nKeys, trail } from './source.mjs'
+// THE PICKER: hold the keys (Ctrl+Shift, Cmd+Shift on a Mac) and an outline follows the pointer with a card saying
+// what is under it; click to pick the element, click more to pick several, and let go. What was picked is on the
+// clipboard at every click, wrapped in one tag so it reads apart from the words around it, and kept by the dev server
+// for an agent to read over MCP. The bar that opens then adds a note, a screenshot, opens the first line in the
+// editor, or unfolds the details: everything read about each pick, with Copy full.
+import { describe, lineText, short } from './source.mjs'
 import { createUi } from './ui.mjs'
 
 export const defaults = Object.freeze({
@@ -14,7 +15,7 @@ export const defaults = Object.freeze({
   skip: ['node_modules/'],
   /** The trail of components stops at the first whose file matches (a Nuxt page or layout). */
   stopAt: '(^|/)(pages|layouts)/',
-  /** The bar after a pick: Note, Screenshot, Open in editor. */
+  /** The bar after a pick: Note, Screenshot, Open in editor, Details. */
   bar: true,
   /** How long the bar stays while nothing happens on it, in milliseconds. */
   barTimeout: 8000,
@@ -24,6 +25,8 @@ export const defaults = Object.freeze({
 
 const CONTEXT = '__pinpointContext'
 const STATE = '__pinpoint'
+/** Whether the details panel opens with the bar, kept in the browser. */
+const DETAILS_KEY = 'pinpoint:details'
 
 /**
  * A line or lines added to every block, after the elements: `fn({ elements, page })` answers a string, an array of
@@ -49,6 +52,22 @@ const attribute = value => String(value).replace(/"/g, '%22')
 const stop = (event) => {
   event.preventDefault()
   event.stopImmediatePropagation()
+}
+const stored = {
+  get: (key) => {
+    try {
+      return localStorage.getItem(key)
+    }
+    catch {
+      return null
+    }
+  },
+  set: (key, value) => {
+    try {
+      localStorage.setItem(key, value)
+    }
+    catch {}
+  },
 }
 
 async function copyText(text) {
@@ -163,6 +182,15 @@ async function shoot(elements) {
   return new Promise((done, fail) => canvas.toBlob(blob => (blob ? done(blob) : fail(new Error('The screenshot came out empty.'))), 'image/png'))
 }
 
+/** A server's answer to an editor that could not open: a `vscode://` address, opened as a link would be. */
+function openAddress(url) {
+  const link = Object.assign(document.createElement('a'), { href: url })
+  link.style.display = 'none'
+  document.documentElement.append(link)
+  link.click()
+  link.remove()
+}
+
 export function start(options = {}) {
   if (typeof window === 'undefined' || globalThis[STATE]) return
   const o = { ...defaults, ...options }
@@ -179,30 +207,39 @@ export function start(options = {}) {
 
   /** What is picked while the keys are held. */
   let batch = []
-  /** The pick the bar is about: `{ id, elements, note, text }`. */
+  /** The pick the bar is about: `{ id, elements, infos, note, text }`. */
   let shown = null
   /** The note being typed, or null while the bar is not a box. */
   let noting = null
+  let details = stored.get(DETAILS_KEY) === 'open'
   let pointer = { x: -1, y: -1 }
   let labelHeldUntil = 0
   let barTimer
 
-  const linesOf = el => trail(el, { ours, stopAt })
+  const info = el => describe(el, { ours, stopAt })
 
-  function build(elements, note) {
+  /** The block: the short one every click copies, or `full` with everything the details panel reads. */
+  function build(infos, note, full = false) {
     const dark = document.documentElement.classList.contains('dark')
     const out = [`<${o.tag} page="${attribute(location.pathname + location.search)}" viewport="${innerWidth}x${innerHeight}"${dark ? ' theme="dark"' : ''}>`]
-    const several = elements.length > 1
-    elements.forEach((el, index) => {
+    const several = infos.length > 1
+    infos.forEach((item, index) => {
       const indent = several ? '   ' : ''
-      out.push(`${several ? `${index + 1}. ` : ''}${described(el)}`)
-      for (const line of linesOf(el)) out.push(`${indent}${line.at} (${line.what})`)
-      const keys = i18nKeys(el)
-      if (keys.length) out.push(`${indent}i18n: ${keys.join(', ')}`)
+      out.push(`${several ? `${index + 1}. ` : ''}${item.label}`)
+      for (const line of item.lines) out.push(`${indent}${lineText(item, line)}`)
+      if (item.keys.length) out.push(`${indent}i18n: ${item.keys.join(', ')}`)
+      if (!full) return
+      const part = [item.part ? `${item.part.owner ?? '?'} › ${item.part.slot}` : null, item.from ? `words from prop ${item.from}` : null, item.library ? `drawn at ${item.library}` : null].filter(Boolean)
+      if (part.length) out.push(`${indent}part: ${part.join(', ')}`)
+      out.push(`${indent}look: ${item.look.line}`)
+      if (item.look.classes) out.push(`${indent}class: ${short(item.look.classes, 240)}`)
+      out.push(`${indent}a11y: ${item.a11y.line}`)
+      if (item.data.length) out.push(`${indent}data: ${item.data.join(' ')}`)
+      if (item.props.length) out.push(`${indent}props: ${item.props.join(' ')}`)
     })
     for (const fn of globalThis[CONTEXT] ?? []) {
       try {
-        for (const line of [fn({ elements, page: location.pathname })].flat()) {
+        for (const line of [fn({ elements: infos.map(item => item.el), page: location.pathname })].flat()) {
           if (line) out.push(String(line))
         }
       }
@@ -218,10 +255,15 @@ export function start(options = {}) {
   async function post(path, body, type = 'application/json') {
     try {
       const response = await fetch(`${o.endpoint}${path}`, { method: 'POST', headers: { 'content-type': type }, body })
-      return response.ok
+      let answer = null
+      try {
+        answer = await response.json()
+      }
+      catch {}
+      return { ok: response.ok && answer?.ok !== false, answer }
     }
     catch {
-      return false
+      return { ok: false, answer: null }
     }
   }
 
@@ -230,33 +272,63 @@ export function start(options = {}) {
     void post('/pick', JSON.stringify({ id: pick.id, page: state.last.page, text: pick.text, note: pick.note || undefined }))
   }
 
-  /** "index.vue:46:9 UButton": the first line of the trail, short, or why there is none. */
-  function labelOf(el) {
-    const first = linesOf(el)[0]
-    if (!first) return `${el.tagName.toLowerCase()}, no source of yours`
-    const name = first.what.startsWith('this element') ? el.tagName.toLowerCase() : first.what.split(' ')[0]
-    return `${first.at.split('/').pop()} ${name}`
+  // ---- The hover card ----------------------------------------------------------------------------------------------
+
+  /** Three short lines: the element, its size and part; its first source line; its translation key. */
+  function cardOf(el) {
+    const item = info(el)
+    const first = item.lines[0]
+    const name = first?.kind === 'component' ? `${first.name}${item.partOnLine ? ` › ${item.part.slot}` : ''}` : item.part ? `${item.part.owner ?? ''} › ${item.part.slot}` : ''
+    const lines = [{ text: [el.tagName.toLowerCase(), item.look.size, name].filter(Boolean).join(' · ') }]
+    if (first) lines.push({ text: first.at.split('/').slice(-2).join('/'), tone: 'accent' })
+    else lines.push({ text: item.library ? `no source of yours (drawn at ${item.library.split('/').pop()})` : 'no source of yours', tone: 'muted' })
+    if (item.keys.length) lines.push({ text: `i18n ${item.keys[0]}`, tone: 'muted' })
+    return lines
   }
 
-  // ---- The bar -----------------------------------------------------------------------------------------------------
+  // ---- The bar and the details panel -------------------------------------------------------------------------------
 
   function barParts(status) {
     if (noting !== null) return [{ note: noting }, { act: 'note-done', text: 'Copy' }, { act: 'note-cancel', text: 'Cancel' }]
-    const canOpen = Boolean(linesOf(shown.elements[0])[0])
+    const canOpen = Boolean(shown.infos[0].lines[0])
     return [
       { status },
       { sep: true },
       { act: 'note', text: 'Note' },
       { act: 'shot', text: 'Screenshot' },
       ...(canOpen ? [{ act: 'open', text: 'Open in editor' }] : []),
+      { act: 'details', text: details ? 'Details ▴' : 'Details ▾', on: details },
       { act: 'close', text: '×' },
     ]
   }
 
-  const copiedWords = () => (shown.elements.length > 1 ? `Copied ${shown.elements.length}` : 'Copied')
+  /** Every pick as a section: its source lines (press to open), its keys (press to copy), and what else was read. */
+  function panelOf(pick) {
+    return pick.infos.map((item, index) => {
+      const rows = []
+      if (item.lines.length) rows.push({ key: 'source', items: item.lines.map(line => ({ text: lineText(item, line), act: 'open-line', value: line.at })) })
+      const part = [
+        item.part ? { text: `${item.part.owner ?? '?'} › ${item.part.slot}` } : null,
+        item.from ? { text: `words from prop ${item.from}` } : null,
+        item.library ? { text: `drawn at ${item.library}`, tone: 'lib' } : null,
+      ].filter(Boolean)
+      if (part.length) rows.push({ key: 'part', items: part })
+      if (item.keys.length) rows.push({ key: 'i18n', items: item.keys.map(key => ({ text: key, act: 'copy', value: key })) })
+      rows.push({ key: 'look', items: [{ text: item.look.line }] })
+      if (item.look.classes) rows.push({ key: 'class', items: [{ text: item.look.classes, act: 'copy', value: item.look.classes }] })
+      rows.push({ key: 'a11y', items: [{ text: item.a11y.line, tone: item.a11y.low ? 'warn' : '' }] })
+      if (item.data.length) rows.push({ key: 'data', items: item.data.map(text => ({ text })) })
+      if (item.props.length) rows.push({ key: 'props', items: [{ text: item.props.join(' ') }] })
+      return { head: `${pick.infos.length > 1 ? `${index + 1}  ` : ''}${item.label}`, rows }
+    })
+  }
+
+  const copiedWords = () => (shown.infos.length > 1 ? `Copied ${shown.infos.length}` : 'Copied')
 
   function renderBar(status = copiedWords()) {
-    if (shown) ui.showBar(shown.elements.at(-1), barParts(status))
+    if (!shown) return
+    ui.showBar(shown.infos.at(-1).el, barParts(status))
+    ui.showPanel(details && noting === null ? panelOf(shown) : null, [{ act: 'copy-full', text: 'Copy full' }])
   }
 
   function closeBar() {
@@ -267,10 +339,10 @@ export function start(options = {}) {
     ui.marks([])
   }
 
-  /** The bar goes once nothing has happened on it for a while; never while a note is being typed. */
+  /** The bar goes once nothing has happened on it for a while; never while a note is typed or the details are open. */
   function holdBar() {
     clearTimeout(barTimer)
-    if (shown && noting === null) barTimer = setTimeout(closeBar, o.barTimeout)
+    if (shown && noting === null && !details) barTimer = setTimeout(closeBar, o.barTimeout)
   }
 
   async function submitNote() {
@@ -278,7 +350,7 @@ export function start(options = {}) {
     noting = null
     if (note) {
       shown.note = note
-      shown.text = build(shown.elements, note)
+      shown.text = build(shown.infos, note)
       const done = await copyText(shown.text)
       remember(shown)
       renderBar(done ? 'Copied with your note' : 'Could not copy')
@@ -293,12 +365,12 @@ export function start(options = {}) {
     const pick = shown
     renderBar('Taking a screenshot...')
     clearTimeout(barTimer)
-    const picture = shoot(pick.elements)
+    const picture = shoot(pick.infos.map(item => item.el))
     picture.catch(() => {})
     const copied = await copyWithPicture(pick.text, picture)
     let saved = false
     try {
-      saved = await post(`/shot?id=${pick.id}`, await picture, 'image/png')
+      saved = (await post(`/shot?id=${pick.id}`, await picture, 'image/png')).ok
     }
     catch (error) {
       console.warn('[pinpoint] The screenshot failed:', error)
@@ -308,16 +380,34 @@ export function start(options = {}) {
     holdBar()
   }
 
-  async function openInEditor() {
-    const first = linesOf(shown.elements[0])[0]
-    if (!first) return
-    const done = await post('/open', JSON.stringify({ file: first.at }))
-    renderBar(done ? 'Opening in your editor' : 'Could not reach the dev server')
+  /** The dev server opens it; when it cannot, its `vscode://` address is tried, and the bar says why. */
+  async function openInEditor(at) {
+    if (!at) return
+    renderBar('Opening...')
+    const { ok, answer } = await post('/open', JSON.stringify({ file: at }))
+    if (ok) renderBar(`Opened ${at.split('/').pop()}`)
+    else {
+      if (answer?.url) openAddress(answer.url)
+      renderBar(answer?.url ? 'Tried a vscode:// link: start the dev server from a VS Code terminal' : answer?.error ?? 'Could not reach the dev server')
+    }
     holdBar()
   }
 
-  function act(name) {
-    if (!shown || !name) return
+  async function copyFull() {
+    const done = await copyText(build(shown.infos, shown.note, true))
+    renderBar(done ? 'Copied everything' : 'Could not copy')
+    holdBar()
+  }
+
+  async function copyValue(value) {
+    const done = await copyText(value)
+    renderBar(done ? `Copied ${short(value, 40)}` : 'Could not copy')
+    holdBar()
+  }
+
+  function act(pressed) {
+    if (!shown || !pressed) return
+    const { act: name, value } = pressed
     if (name === 'close') return closeBar()
     if (name === 'note') {
       noting = ''
@@ -330,8 +420,17 @@ export function start(options = {}) {
       renderBar()
       return holdBar()
     }
+    if (name === 'details') {
+      details = !details
+      stored.set(DETAILS_KEY, details ? 'open' : 'folded')
+      renderBar()
+      return holdBar()
+    }
     if (name === 'shot') return takeShot()
-    if (name === 'open') return openInEditor()
+    if (name === 'open') return openInEditor(shown.infos[0].lines[0]?.at)
+    if (name === 'open-line') return openInEditor(value)
+    if (name === 'copy') return copyValue(value)
+    if (name === 'copy-full') return copyFull()
   }
 
   /** A note is typed here, never in a field: the keys are taken whole, so the app's focused field gets none. */
@@ -342,7 +441,7 @@ export function start(options = {}) {
     if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'v') return event.stopImmediatePropagation()
     stop(event)
     if (key === 'Enter') return submitNote()
-    if (key === 'Escape') return act('note-cancel')
+    if (key === 'Escape') return act({ act: 'note-cancel' })
     if (key === 'Backspace') noting = event.ctrlKey || event.altKey ? noting.replace(/\s*\S+\s*$/, '') : noting.slice(0, -1)
     else if (key.length === 1 && !event.ctrlKey && !event.metaKey) noting += key
     else return
@@ -358,19 +457,21 @@ export function start(options = {}) {
     else batch.push(el)
     ui.marks(batch)
     if (!batch.length) return ui.hover(null)
-    const text = build(batch)
+    const text = build(batch.map(info))
     const done = await copyText(text)
     labelHeldUntil = Date.now() + 900
-    ui.hover(el, done ? (batch.length > 1 ? `Copied ${batch.length}` : 'Copied') : 'Could not copy, see the console')
+    // THE CARD IS MADE AGAIN once "Copied" has been read, or it would keep saying it.
+    carded = null
+    ui.hover(el, [{ text: done ? (batch.length > 1 ? `Copied ${batch.length}` : 'Copied') : 'Could not copy, see the console', tone: 'accent' }])
     if (!done) console.info(`[pinpoint]${text}`)
   }
 
   /** The keys let go: the picks become one, kept for the agent, and the bar opens on it. */
   function endBatch() {
-    const elements = batch
+    const infos = batch.map(info)
     batch = []
     ui.hover(null)
-    shown = { id: newId(), elements, note: '', text: build(elements) }
+    shown = { id: newId(), infos, note: '', text: build(infos) }
     remember(shown)
     if (o.bar) {
       renderBar()
@@ -388,17 +489,23 @@ export function start(options = {}) {
    */
   let shortcut = false
   const MODIFIERS = ['Shift', 'Control', 'Meta', 'Alt', 'AltGraph', 'CapsLock']
+  /** The element the card was last made for, so crossing one element reads it once. */
+  let carded = null
 
   function follow(event) {
     if (!armed(event)) {
       ui.hover(null)
+      carded = null
       if (batch.length) endBatch()
       return
     }
     if (shortcut) return ui.hover(null)
     const el = document.elementFromPoint(pointer.x, pointer.y)
     if (!el || ui.owns(el)) return ui.hover(null)
-    ui.hover(el, Date.now() < labelHeldUntil ? undefined : labelOf(el))
+    if (Date.now() < labelHeldUntil) return ui.hover(el)
+    if (el === carded) return ui.hover(el)
+    carded = el
+    ui.hover(el, cardOf(el))
   }
 
   window.addEventListener('pointermove', (event) => {
@@ -432,6 +539,7 @@ export function start(options = {}) {
 
   window.addEventListener('blur', () => {
     ui.hover(null)
+    carded = null
     if (batch.length) endBatch()
   })
 
@@ -454,3 +562,4 @@ export function start(options = {}) {
     void add(event.target)
   }, { capture: true })
 }
+

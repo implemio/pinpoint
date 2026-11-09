@@ -1,14 +1,84 @@
 // THE DEV SERVER'S HALF: a connect middleware the Vite plugin mounts at `/__pinpoint`. It keeps each pick for the
 // MCP server, keeps a pick's screenshot beside it, and opens a source line in the editor. Dev only: nothing here
 // is reachable from a build.
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
+import process from 'node:process'
 import launchEditor from 'launch-editor'
 import { readPicks, storeDir, workspaceRoot, writePicks } from './store.mjs'
 
 /** How many picks are kept; an older one goes with its screenshot. */
 const KEEP = 20
 const ID = /^[a-z0-9]{4,40}$/
+
+// ---- Opening a line in the editor --------------------------------------------------------------------------------
+
+/** Editors that take VS Code's `-r -g file:line:column`. */
+const CODE_LIKE = /^(code|code-insiders|codium|cursor|windsurf)(\.cmd|\.exe)?$/
+
+/** Runs the editor's command and says whether it took: exit 0, or still running after a while (it stayed open). */
+function run(command, args, env) {
+  return new Promise((done) => {
+    let stderr = ''
+    let child
+    try {
+      child = spawn(command, args, { env, stdio: ['ignore', 'ignore', 'pipe'], shell: process.platform === 'win32' })
+    }
+    catch (error) {
+      return done({ ok: false, error: String(error?.message ?? error) })
+    }
+    const timer = setTimeout(() => {
+      child.unref()
+      done({ ok: true })
+    }, 8000)
+    child.stderr?.on('data', (chunk) => { stderr += chunk })
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      done({ ok: false, error: error.message })
+    })
+    child.on('exit', (code) => {
+      clearTimeout(timer)
+      done(code === 0 ? { ok: true } : { ok: false, error: stderr.trim().split('\n').pop() || `${command} ended with code ${code}` })
+    })
+  })
+}
+
+/**
+ * VS CODE'S COMMAND REACHES ITS WINDOW THROUGH THE SOCKET ITS TERMINAL GAVE IT (`VSCODE_IPC_HOOK_CLI`), and a dev server
+ * started outside a VS Code terminal can hold one that is gone. Without it, and without the remote CLI first on the
+ * PATH, `code` is the desktop's own launcher, which finds the window itself, a WSL one included.
+ */
+function withoutDeadSocket(env) {
+  const socket = env.VSCODE_IPC_HOOK_CLI
+  if (!socket || existsSync(socket)) return null
+  const next = { ...env }
+  delete next.VSCODE_IPC_HOOK_CLI
+  next.PATH = (env.PATH ?? '').split(':').filter(dir => !dir.includes('/remote-cli')).join(':')
+  return next
+}
+
+/** `LAUNCH_EDITOR`, VS Code by default: a VS Code-like editor directly (and once more past a dead socket), any other through launch-editor. */
+async function openFile(full, line, column) {
+  const editor = process.env.LAUNCH_EDITOR || 'code'
+  if (!CODE_LIKE.test(editor.split(/[\\/]/).pop())) {
+    return new Promise((done) => {
+      launchEditor(`${full}:${line}:${column}`, editor, (_name, error) => done({ ok: false, error: error || `${editor} did not start` }))
+      setTimeout(() => done({ ok: true }), 1500)
+    })
+  }
+  const args = ['-r', '-g', `${full}:${line}:${column}`]
+  const first = await run(editor, args, process.env)
+  if (first.ok) return first
+  const env = withoutDeadSocket(process.env)
+  return env ? run(editor, args, env) : first
+}
+
+/** The same place as a `vscode://` address, for the browser to try when the server could not open it. */
+function editorAddress(full, line, column) {
+  const at = `${full}:${line}:${column}`
+  return process.env.WSL_DISTRO_NAME ? `vscode://vscode-remote/wsl+${process.env.WSL_DISTRO_NAME}${at}` : `vscode://file${at.startsWith('/') ? '' : '/'}${at}`
+}
 
 function readBody(request, limit) {
   return new Promise((done, fail) => {
@@ -119,11 +189,9 @@ export function pinpointMiddleware({ root = workspaceRoot() } = {}) {
         }
         const inside = relative(realpathSync(root), full)
         if (!inside || inside.startsWith('..') || isAbsolute(inside)) return send(response, 403, { error: 'That file is outside the workspace.' })
-        const at = `${full}${match[2] ? `:${match[2]}` : ''}${match[3] ? `:${match[3]}` : ''}`
-        launchEditor(at, undefined, (name, error) => {
-          console.warn(`[pinpoint] Could not open ${name} in your editor${error ? `: ${error}` : ''}. Set LAUNCH_EDITOR, for example to "code".`)
-        })
-        return send(response, 200, { ok: true })
+        const opened = await openFile(full, match[2] ?? '1', match[3] ?? '1')
+        if (!opened.ok) console.warn(`[pinpoint] Could not open ${full} in your editor: ${opened.error}`)
+        return send(response, 200, opened.ok ? { ok: true } : { ok: false, error: `Could not open it: ${opened.error}`, url: editorAddress(full, match[2] ?? '1', match[3] ?? '1') })
       }
 
       return next()

@@ -6,19 +6,20 @@ or let the agent read it over MCP with no paste at all.
 
 ```
 <picked page="/" viewport="1440x900" theme="dark">
-span "Get started"
-apps/web/app/pages/index.vue:46:9 (UButton size="xl" to="/login")
-apps/web/app/pages/index.vue:36:5 (UPageHero)
-i18n: landing.hero.cta
+h1 "Your own website and shop, on your own domain"
+apps/web/app/pages/index.vue:36:5 (UPageHero › title · title="Your own website and shop, on your own d...")
+i18n: landing.hero.title
 </picked>
 ```
 
-Dev only: nothing of it is in a build.
+Dev only: nothing of it is in a build. It looks the same in every app, theme and mode: its own dark surface and one
+teal accent, never the app's colours.
 
 ## Use
 
-- **Hold Ctrl+Shift** (Cmd+Shift on a Mac): an outline follows the pointer, labelled with the file and line that draws
-  what is under it.
+- **Hold Ctrl+Shift** (Cmd+Shift on a Mac): an outline follows the pointer with a card: the element, its size and the
+  component part it is (`UPageHero › title`), its first source line, and its translation key. A shortcut you press
+  while holding the keys (Ctrl+Shift+Z) hides it until the pointer moves.
 - **Click** to pick it. Click more elements while holding the keys to pick several; they are numbered. A click on a
   picked one drops it. The click never reaches the page, so a button or link you pick does not act.
 - **Let go.** The block is already on your clipboard (it is copied at every click), and a bar opens by the element:
@@ -26,9 +27,10 @@ Dev only: nothing of it is in a build.
     never to a field in the page.
   - **Screenshot**: a PNG of the picked elements, on the clipboard beside the text (where you paste takes the one it
     reads), and kept for the agent.
-  - **Open in editor**: the first line, in your editor (through `launch-editor`; set `LAUNCH_EDITOR`, for example to
-    `code`, if it guesses wrong).
-  - Escape, a press anywhere else, or 8 seconds of nothing closes it.
+  - **Open in editor**: the first line, in your editor (below).
+  - **Details**: unfolds everything read about each pick (below), and stays unfolded for the next pick until you
+    fold it.
+  - Escape, a press anywhere else, or 8 seconds of nothing closes it (never while the details are open).
 
 What the block holds:
 
@@ -36,16 +38,42 @@ What the block holds:
 - The element: its tag, id and words (its label, text, title, placeholder or alt).
 - Its template line (`this element`), then each component around it where it is used, with the props passed there
   (words, numbers and switches; never handlers), up to the page or layout. Lines inside `node_modules` are left out,
-  so for an element a library draws, the first line is where you used that library's component.
+  so for an element a library draws, the first line is where you used that library's component, with the part it is
+  when that component marks its parts (`data-slot`, as Nuxt UI does): `UPageHero › title`.
 - `i18n:` the translation keys whose message reads as the element's words, when the app uses vue-i18n.
 - Any lines your app adds (`addPickContext`, below) and your note.
+
+### The details
+
+Per pick, without pasting it anywhere:
+
+| Row | What it says |
+| --- | --- |
+| source | Every line of the trail; press one to open it in the editor. |
+| part | Which part of which component it is, the prop its words came from, and the library's own line, muted. |
+| i18n | Its translation keys; press one to copy it. |
+| look | Size, font, colour on its background, layout and gap, padding, margin, radius. |
+| class | Its classes; press to copy. |
+| a11y | Role, accessible name, whether it takes focus, and its text's contrast, marked when under 4.5:1 (3:1 for large text). |
+| data | Its `data-*` attributes, and the `data-landmark` it sits in. |
+| props | Every prop passed where the component is used, not just six. |
+
+**Copy full** puts all of it in the block; a click still copies the short one.
+
+### Open in editor
+
+The dev server runs `LAUNCH_EDITOR` (VS Code's `code` when unset) with the file, line and column. VS Code's command
+reaches its window through the terminal it was started in; a dev server started anywhere else can hold a link that is
+gone, so the server tries once more with VS Code's own launcher, which finds the window itself (from WSL too). When
+both fail, the browser tries a `vscode://` address and the bar says why. Starting the dev server from a VS Code
+terminal always works.
 
 ## Install
 
 From GitHub, as a dev dependency:
 
 ```bash
-pnpm add -D github:implemio/pinpoint#semver:^0.1.0
+pnpm add -D github:implemio/pinpoint#semver:^0.2.0
 ```
 
 `pnpm update @implemio/pinpoint` then moves to the newest tag in that range.

@@ -1,40 +1,71 @@
-// WHAT THE PICKER DRAWS: the outline that follows the pointer, a mark on each picked element and the bar after a
-// pick, in one shadow root over the page, so the app's styles never reach it and it never reaches the app's. It
-// takes no focus and handles no event itself: the controller reads presses off the composed path (`actOf`), so a
-// focus trap or an outside-press handler in the app never sees the bar.
+// WHAT THE PICKER DRAWS: the outline that follows the pointer with its card, a mark on each picked element, and the
+// dock after a pick (the bar, and the details panel under it), in one shadow root over the page, so the app's styles
+// never reach it and it never reaches the app's. It takes no focus and handles no event itself: the controller reads
+// presses off the composed path (`actOf`), so a focus trap or an outside-press handler in the app never sees it.
+//
+// ONE LOOK IN EVERY APP: its own colours, never the app's tokens, so the outline and the bar are the same in every
+// project, theme and mode. A dark surface, and one teal accent ringed in a dark halo, so it shows on white and on
+// black alike.
 
 const CSS = `
 :host {
-  all: initial; position: fixed; inset: 0; pointer-events: none; z-index: 2147483647;
-  --pp-accent: var(--ui-primary, #0ea5e9); --pp-ink: var(--ui-bg-inverted, #111827); --pp-paper: var(--ui-bg, #ffffff);
+  all: initial; position: fixed; inset: 0; pointer-events: none; z-index: 2147483647; color-scheme: dark;
+  --pp-accent: oklch(79.8% 0.065 193.3);
+  --pp-accent-ink: oklch(24% 0.03 193);
+  --pp-surface: oklch(21% 0.006 250);
+  --pp-raised: oklch(27% 0.008 250);
+  --pp-line: oklch(100% 0 0 / 0.12);
+  --pp-text: oklch(95% 0.005 250);
+  --pp-muted: oklch(70% 0.012 250);
+  --pp-warn: oklch(82% 0.13 75);
+  --pp-halo: rgb(0 0 0 / 0.55);
+  --pp-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --pp-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-.box { position: fixed; border: 2px solid var(--pp-accent); border-radius: 4px; pointer-events: none; }
-.picked { background: color-mix(in srgb, var(--pp-accent) 10%, transparent); }
-.tag, .num {
-  position: absolute; left: -2px; padding: 1px 6px; white-space: nowrap;
-  font: 500 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+.box { position: fixed; border: 2px solid var(--pp-accent); border-radius: 4px; pointer-events: none; box-shadow: 0 0 0 1px var(--pp-halo), inset 0 0 0 1px var(--pp-halo); }
+.picked { background: color-mix(in srgb, var(--pp-accent) 12%, transparent); }
+.num { position: absolute; left: -2px; top: -2px; padding: 0 6px; border-radius: 3px 0 4px 0; background: var(--pp-accent); color: var(--pp-accent-ink); font: 600 11px/1.6 var(--pp-mono); }
+.card {
+  position: fixed; max-width: min(32rem, calc(100vw - 16px)); padding: 4px 8px; border: 1px solid var(--pp-line); border-radius: 6px;
+  background: var(--pp-surface); color: var(--pp-text); font: 11px/1.5 var(--pp-mono); white-space: nowrap; overflow: hidden;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35); pointer-events: none;
 }
-.tag { bottom: 100%; margin-bottom: 4px; border-radius: 4px; background: var(--pp-ink); color: var(--pp-paper); }
-.num { top: -2px; border-radius: 3px 0 4px 0; background: var(--pp-accent); color: #fff; }
+.card div { overflow: hidden; text-overflow: ellipsis; }
+.accent { color: var(--pp-accent); }
+.muted { color: var(--pp-muted); }
+.dock { position: fixed; display: flex; flex-direction: column; gap: 4px; max-width: calc(100vw - 16px); pointer-events: auto; }
 .bar {
-  position: fixed; display: flex; align-items: center; gap: 2px; padding: 4px; max-width: calc(100vw - 16px);
-  border-radius: 8px; background: var(--pp-ink); color: var(--pp-paper); pointer-events: auto;
-  font: 12px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; box-shadow: 0 6px 24px rgb(0 0 0 / 0.3);
+  display: flex; align-items: center; gap: 2px; align-self: flex-start; padding: 4px; border: 1px solid var(--pp-line); border-radius: 8px;
+  background: var(--pp-surface); color: var(--pp-text); font: 12px/1.4 var(--pp-sans); box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
 }
-.status { padding: 4px 8px; white-space: nowrap; opacity: 0.85; }
+.status { padding: 4px 8px; white-space: nowrap; color: var(--pp-accent); }
 .act { padding: 4px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; user-select: none; }
-.act:hover { background: color-mix(in srgb, var(--pp-paper) 16%, transparent); }
-.sep { width: 1px; align-self: stretch; margin: 2px; background: color-mix(in srgb, var(--pp-paper) 22%, transparent); }
-.note {
-  display: flex; align-items: center; min-width: 16rem; max-width: 28rem; padding: 4px 8px; overflow: hidden;
-  border-radius: 6px; background: color-mix(in srgb, var(--pp-paper) 12%, transparent); white-space: pre;
-}
-.placeholder { opacity: 0.6; }
+.act:hover, .act.on { background: var(--pp-raised); }
+.sep { width: 1px; align-self: stretch; margin: 2px; background: var(--pp-line); }
+.note { display: flex; align-items: center; min-width: 16rem; max-width: 28rem; padding: 4px 8px; overflow: hidden; border-radius: 6px; background: var(--pp-raised); white-space: pre; }
+.placeholder { color: var(--pp-muted); }
 .caret { display: inline-block; flex: none; width: 1px; height: 1.1em; margin-left: 1px; background: currentColor; animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+.panel {
+  width: min(38rem, calc(100vw - 16px)); padding: 8px 10px; overflow: auto; border: 1px solid var(--pp-line); border-radius: 8px;
+  background: var(--pp-surface); color: var(--pp-text); font: 11.5px/1.55 var(--pp-mono); box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
+}
+.pick + .pick { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--pp-line); }
+.head { margin-bottom: 2px; font-weight: 600; overflow-wrap: anywhere; }
+.row { display: flex; gap: 10px; }
+.key { flex: none; width: 3.75rem; color: var(--pp-muted); }
+.val { min-width: 0; overflow-wrap: anywhere; }
+.val > span + span::before { content: ' · '; color: var(--pp-muted); }
+.link { cursor: pointer; text-decoration: underline; text-decoration-color: var(--pp-line); text-underline-offset: 2px; }
+.link:hover { color: var(--pp-accent); text-decoration-color: currentColor; }
+.lib { color: var(--pp-muted); }
+.warn { color: var(--pp-warn); }
+.foot { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.button { padding: 3px 10px; border: 1px solid var(--pp-line); border-radius: 6px; font: 12px/1.4 var(--pp-sans); cursor: pointer; user-select: none; }
+.button:hover { background: var(--pp-raised); }
 `
 
 export function createUi() {
@@ -42,58 +73,98 @@ export function createUi() {
   host.setAttribute('data-pinpoint', '')
   host.setAttribute('data-v-inspector-ignore', '')
   const root = host.attachShadow({ mode: 'open' })
-  root.innerHTML = `<style>${CSS}</style><div class="box" data-hover hidden><span class="tag"></span></div><div data-marks></div><div class="bar" role="toolbar" hidden></div>`
+  root.innerHTML = `<style>${CSS}</style><div class="box" data-hover hidden></div><div class="card" data-card hidden></div><div data-marks></div><div class="dock" hidden><div class="bar" role="toolbar"></div><div class="panel" hidden></div></div>`
   const hoverBox = root.querySelector('[data-hover]')
-  const hoverTag = hoverBox.firstElementChild
+  const card = root.querySelector('[data-card]')
   const marksLayer = root.querySelector('[data-marks]')
+  const dock = root.querySelector('.dock')
   const bar = root.querySelector('.bar')
+  const panel = root.querySelector('.panel')
   // ON <html>, NOT <body>: a transform on the body would make every fixed box inside it relative to the body.
   document.documentElement.append(host)
 
   let marked = []
   let anchor = null
+  let hovered = null
+
+  const node = (tag, className, text) => {
+    const el = document.createElement(tag)
+    if (className) el.className = className
+    if (text !== undefined) el.textContent = text
+    return el
+  }
+  const actable = (el, act, value) => {
+    el.dataset.act = act
+    if (value !== undefined) el.dataset.value = value
+    el.setAttribute('role', 'button')
+    return el
+  }
 
   const place = (box, el) => {
     const rect = el.getBoundingClientRect()
     Object.assign(box.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` })
   }
+  const clampLeft = (left, width) => Math.min(Math.max(8, left), Math.max(8, innerWidth - width - 8))
 
-  /** Under the anchor when it fits, else over it; inside the window across. */
-  const placeBar = () => {
-    if (bar.hidden || !anchor) return
+  /** Over the element when there is room, else under it, else inside its top; always inside the window across. */
+  const placeCard = () => {
+    if (card.hidden || !hovered) return
+    const rect = hovered.getBoundingClientRect()
+    const size = card.getBoundingClientRect()
+    const top = rect.top - size.height - 6 >= 4 ? rect.top - size.height - 6 : rect.bottom + 6 + size.height <= innerHeight - 4 ? rect.bottom + 6 : Math.max(4, rect.top + 4)
+    Object.assign(card.style, { left: `${clampLeft(rect.left, size.width)}px`, top: `${top}px` })
+  }
+
+  /**
+   * THE DOCK under the anchor when it fits, else over it, else on the side with more room, the panel scrolling in
+   * what is left; inside the window's foot when the anchor fills the window.
+   */
+  const placeDock = () => {
+    if (dock.hidden || !anchor) return
     const rect = anchor.getBoundingClientRect()
-    const size = bar.getBoundingClientRect()
-    const below = rect.bottom + 8
-    const top = below + size.height <= innerHeight - 8 ? below : Math.max(8, rect.top - 8 - size.height)
-    const left = Math.min(Math.max(8, rect.left), Math.max(8, innerWidth - size.width - 8))
-    Object.assign(bar.style, { left: `${left}px`, top: `${top}px` })
+    const barHeight = bar.getBoundingClientRect().height
+    const below = innerHeight - rect.bottom - 16
+    const above = rect.top - 16
+    const need = barHeight + (panel.hidden ? 0 : panel.scrollHeight + 6)
+    let side = below >= need ? 'below' : above >= need ? 'above' : below >= above ? 'below' : 'above'
+    let room = side === 'below' ? below : above
+    if (room < barHeight + 48) {
+      side = 'inside'
+      room = innerHeight * 0.6
+    }
+    panel.style.maxHeight = `${Math.max(96, room - barHeight - 6)}px`
+    const size = dock.getBoundingClientRect()
+    const top = side === 'below' ? rect.bottom + 8 : side === 'above' ? rect.top - 8 - size.height : innerHeight - 8 - size.height
+    Object.assign(dock.style, { left: `${clampLeft(rect.left, size.width)}px`, top: `${Math.max(8, top)}px` })
   }
 
   const reposition = () => {
     marked.forEach((el, index) => marksLayer.children[index] && place(marksLayer.children[index], el))
-    placeBar()
+    if (hovered && !hoverBox.hidden) place(hoverBox, hovered)
+    placeCard()
+    placeDock()
   }
   window.addEventListener('scroll', reposition, { capture: true, passive: true })
   window.addEventListener('resize', reposition, { passive: true })
 
-  const node = (tag, className, text) => {
-    const el = document.createElement(tag)
-    el.className = className
-    if (text !== undefined) el.textContent = text
-    return el
-  }
-
   return {
     owns: target => target === host,
 
-    hover(el, label) {
+    /** The outline on `el` and, given `lines` (`[{ text, tone }]` rows), its card; nothing for `null`. */
+    hover(el, lines) {
+      hovered = el
       if (!el) {
         hoverBox.hidden = true
+        card.hidden = true
         return
       }
       place(hoverBox, el)
-      if (label !== undefined) hoverTag.textContent = label
       hoverBox.hidden = false
+      if (lines) {
+        card.replaceChildren(...lines.map(line => node('div', line.tone ?? '', line.text)))
+        card.hidden = false
+      }
+      placeCard()
     },
 
     marks(elements) {
@@ -107,7 +178,7 @@ export function createUi() {
     },
 
     /**
-     * The bar's parts, in order: `{ status }`, `{ sep: true }`, `{ act, text }`, or `{ note }` (the words typed so
+     * The bar's parts, in order: `{ status }`, `{ sep: true }`, `{ act, text, on }`, or `{ note }` (the words typed so
      * far, drawn as a box with its caret; the keys never go to a real field, so no focus moves).
      */
     showBar(el, parts) {
@@ -120,23 +191,58 @@ export function createUi() {
           box.append(part.note ? document.createTextNode(part.note) : node('span', 'placeholder', 'What about it?'), node('span', 'caret'))
           return box
         }
-        const act = node('span', 'act', part.text)
-        act.dataset.act = part.act
-        act.setAttribute('role', 'button')
-        return act
+        return actable(node('span', `act${part.on ? ' on' : ''}`, part.text), part.act)
       }))
-      bar.hidden = false
-      placeBar()
+      dock.hidden = false
+      placeDock()
+    },
+
+    /**
+     * The details panel, or none. `picks` is `[{ head, rows: [{ key, items: [{ text, act, value, tone }] }] }]`; an item
+     * with an act is pressable (a source line opens in the editor, a key is copied). `foot` is the panel's buttons.
+     */
+    showPanel(picks, foot = []) {
+      if (!picks) {
+        panel.hidden = true
+        panel.replaceChildren()
+        placeDock()
+        return
+      }
+      panel.replaceChildren(...picks.map((pick) => {
+        const section = node('div', 'pick')
+        section.append(node('div', 'head', pick.head))
+        for (const row of pick.rows) {
+          const line = node('div', 'row')
+          const value = node('div', 'val')
+          for (const item of row.items) {
+            const span = node('span', [item.act ? 'link' : '', item.tone ?? ''].join(' ').trim(), item.text)
+            value.append(item.act ? actable(span, item.act, item.value) : span)
+          }
+          line.append(node('span', 'key', row.key), value)
+          section.append(line)
+        }
+        return section
+      }), ...(foot.length ? [(() => {
+        const bottom = node('div', 'foot')
+        bottom.append(...foot.map(button => actable(node('span', 'button', button.text), button.act)))
+        return bottom
+      })()] : []))
+      panel.hidden = false
+      placeDock()
     },
 
     hideBar() {
-      bar.hidden = true
+      dock.hidden = true
+      panel.hidden = true
       anchor = null
     },
 
-    barOpen: () => !bar.hidden,
+    barOpen: () => !dock.hidden,
 
-    /** The act pressed, read off the composed path of an event the shadow root retargeted to the host. */
-    actOf: event => event.composedPath().find(target => target instanceof HTMLElement && target.dataset?.act)?.dataset.act,
+    /** The act pressed and its value, read off the composed path of an event the shadow root retargeted to the host. */
+    actOf(event) {
+      const target = event.composedPath().find(el => el instanceof HTMLElement && el.dataset?.act)
+      return target ? { act: target.dataset.act, value: target.dataset.value } : null
+    },
   }
 }
