@@ -1,0 +1,48 @@
+{
+  "name": "@implemio/pinpoint",
+  "version": "0.1.0",
+  "description": "Point at an element in a Vue or Nuxt dev server and copy where it is written: the page, the element and the .vue lines that draw it, ready to paste or for an agent to read over MCP.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Implemio",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/implemio/pinpoint.git"
+  },
+  "keywords": ["vue", "nuxt", "vite", "devtools", "inspector", "source", "mcp"],
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/nuxt.mjs"
+    },
+    "./nuxt": {
+      "types": "./types/index.d.ts",
+      "default": "./src/nuxt.mjs"
+    },
+    "./vite": {
+      "types": "./types/vite.d.ts",
+      "default": "./src/vite.mjs"
+    },
+    "./client": {
+      "types": "./types/client.d.ts",
+      "default": "./src/client/index.mjs"
+    }
+  },
+  "bin": {
+    "pinpoint-mcp": "./src/mcp.mjs"
+  },
+  "files": ["src", "types", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@nuxt/kit": "^3.15.0 || ^4.0.0",
+    "launch-editor": "^2.10.0",
+    "modern-screenshot": "^4.6.0",
+    "vite-plugin-vue-tracer": "^1.0.0"
+  },
+  "peerDependencies": {
+    "vite": ">=6.0.0",
+    "vue": "^3.5.0"
+  }
+}
