@@ -106,9 +106,10 @@ export function partOf(el) {
   const slotted = el.closest('[data-slot]')
   if (!slotted) return null
   // THE TEMPLATE THAT WROTE IT (`vnode.ctx`, the instance rendering when the vnode was made), not the component it is
-  // mounted inside: a hero's title passed through its container's slot is the hero's part.
+  // mounted inside: a hero's title passed through its container's slot is the hero's part. A wrapper (Reka's
+  // `<Primitive as="h1" data-slot="title">`) is skipped the same way, through whoever wrote the wrapper.
   let owner = slotted.__vnode?.ctx ?? slotted.__vueParentComponent
-  while (owner && PLUMBING.has(componentName(owner))) owner = owner.parent
+  while (owner && PLUMBING.has(componentName(owner))) owner = owner.vnode?.ctx ?? owner.parent
   return { slot: slotted.getAttribute('data-slot'), owner: owner ? componentName(owner) : null }
 }
 
