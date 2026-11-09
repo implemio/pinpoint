@@ -37,18 +37,19 @@ const CSS = `
 .muted { color: var(--pp-muted); }
 .dock { position: fixed; display: flex; flex-direction: column; gap: 4px; max-width: calc(100vw - 16px); pointer-events: auto; }
 .bar {
-  display: flex; align-items: center; gap: 2px; align-self: flex-start; padding: 4px; border: 1px solid var(--pp-line); border-radius: 8px;
+  display: flex; align-items: flex-end; gap: 2px; align-self: flex-start; padding: 4px; border: 1px solid var(--pp-line); border-radius: 8px;
   background: var(--pp-surface); color: var(--pp-text); font: 12px/1.4 var(--pp-sans); box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
 }
 .status { padding: 4px 8px; white-space: nowrap; color: var(--pp-accent); }
 .act { padding: 4px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; user-select: none; }
 .act:hover, .act.on { background: var(--pp-raised); }
 .sep { width: 1px; align-self: stretch; margin: 2px; background: var(--pp-line); }
-.note { display: flex; align-items: center; min-width: 16rem; max-width: 28rem; padding: 4px 8px; overflow: hidden; border-radius: 6px; background: var(--pp-raised); white-space: pre; }
-.placeholder { color: var(--pp-muted); }
-.caret { display: inline-block; flex: none; width: 1px; height: 1.1em; margin-left: 1px; background: currentColor; animation: blink 1s steps(1) infinite; }
-@keyframes blink { 50% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+.note {
+  all: unset; display: block; box-sizing: border-box; width: min(28rem, calc(100vw - 160px)); max-height: 40vh; padding: 4px 8px;
+  border-radius: 6px; background: var(--pp-raised); color: var(--pp-text); font: 12px/1.45 var(--pp-sans); white-space: pre-wrap;
+  overflow-wrap: anywhere; overflow-y: auto; resize: none; caret-color: var(--pp-accent); cursor: text;
+}
+.note::placeholder { color: var(--pp-muted); }
 .panel {
   width: min(38rem, calc(100vw - 16px)); padding: 8px 10px; overflow: auto; border: 1px solid var(--pp-line); border-radius: 8px;
   background: var(--pp-surface); color: var(--pp-text); font: 11.5px/1.55 var(--pp-mono); box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
@@ -86,6 +87,8 @@ export function createUi() {
   let marked = []
   let anchor = null
   let hovered = null
+  /** The note's box while one is typed: a real textarea, so it edits as any does. */
+  let noteArea = null
 
   const node = (tag, className, text) => {
     const el = document.createElement(tag)
@@ -138,6 +141,14 @@ export function createUi() {
     Object.assign(dock.style, { left: `${clampLeft(rect.left, size.width)}px`, top: `${Math.max(8, top)}px` })
   }
 
+  /** The note's box as tall as its words, up to 40% of the window, then it scrolls. */
+  const fitNote = () => {
+    if (!noteArea) return
+    noteArea.style.height = 'auto'
+    noteArea.style.height = `${Math.min(noteArea.scrollHeight, innerHeight * 0.4)}px`
+    placeDock()
+  }
+
   const reposition = () => {
     marked.forEach((el, index) => marksLayer.children[index] && place(marksLayer.children[index], el))
     if (hovered && !hoverBox.hidden) place(hoverBox, hovered)
@@ -178,24 +189,37 @@ export function createUi() {
     },
 
     /**
-     * The bar's parts, in order: `{ status }`, `{ sep: true }`, `{ act, text, on }`, or `{ note }` (the words typed so
-     * far, drawn as a box with its caret; the keys never go to a real field, so no focus moves).
+     * The bar's parts, in order: `{ status }`, `{ sep: true }`, `{ act, text, on }`, or `{ note }` (the note's box,
+     * holding those words; focus it with `focusNote`).
      */
     showBar(el, parts) {
       if (el) anchor = el
+      noteArea = null
       bar.replaceChildren(...parts.map((part) => {
         if (part.sep) return node('span', 'sep')
         if (part.status !== undefined) return node('span', 'status', part.status)
         if (part.note !== undefined) {
-          const box = node('span', 'note')
-          box.append(part.note ? document.createTextNode(part.note) : node('span', 'placeholder', 'What about it?'), node('span', 'caret'))
-          return box
+          noteArea = Object.assign(document.createElement('textarea'), { className: 'note', rows: 1, value: part.note, spellcheck: true, placeholder: 'What about it? Enter copies, Shift+Enter is a new line' })
+          return noteArea
         }
         return actable(node('span', `act${part.on ? ' on' : ''}`, part.text), part.act)
       }))
       dock.hidden = false
       placeDock()
+      fitNote()
     },
+
+    noteValue: () => noteArea?.value ?? '',
+    fitNote,
+    /** The keyboard into the note, its caret at the end. */
+    focusNote() {
+      if (!noteArea) return
+      noteArea.focus({ preventScroll: true })
+      noteArea.setSelectionRange(noteArea.value.length, noteArea.value.length)
+    },
+    blurNote: () => noteArea?.blur(),
+    /** Whether an event is the note's own (a key, a press, its input), read off the composed path. */
+    isNote: event => Boolean(noteArea) && event.composedPath().includes(noteArea),
 
     /**
      * The details panel, or none. `picks` is `[{ head, rows: [{ key, items: [{ text, act, value, tone }] }] }]`; an item
@@ -235,6 +259,7 @@ export function createUi() {
       dock.hidden = true
       panel.hidden = true
       anchor = null
+      noteArea = null
     },
 
     barOpen: () => !dock.hidden,

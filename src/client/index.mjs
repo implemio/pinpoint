@@ -27,6 +27,9 @@ const CONTEXT = '__pinpointContext'
 const STATE = '__pinpoint'
 /** Whether the details panel opens with the bar, kept in the browser. */
 const DETAILS_KEY = 'pinpoint:details'
+/** How long a note left unsent is kept, and how long the chip offering it back stays. */
+const KEEP_NOTE_MS = 10 * 60_000
+const CHIP_MS = 8000
 
 /**
  * A line or lines added to every block, after the elements: `fn({ elements, page })` answers a string, an array of
@@ -209,8 +212,14 @@ export function start(options = {}) {
   let batch = []
   /** The pick the bar is about: `{ id, elements, infos, note, text }`. */
   let shown = null
-  /** The note being typed, or null while the bar is not a box. */
+  /** The words a note started with while one is typed (its box holds what is typed since), or null. */
   let noting = null
+  /** Where the keyboard was before the note took it, given back when the note ends. */
+  let returnFocus = null
+  /** A note left without Copy, kept with its picks: `{ infos, note, keys, at }`. */
+  let parked = null
+  let chip = false
+  let chipTimer
   let details = stored.get(DETAILS_KEY) === 'open'
   let pointer = { x: -1, y: -1 }
   let labelHeldUntil = 0
@@ -288,13 +297,22 @@ export function start(options = {}) {
 
   // ---- The bar and the details panel -------------------------------------------------------------------------------
 
+  /** A pick's identity that outlives a re-render: its words and its first source line. */
+  const keyOf = item => `${item.label}|${item.lines[0]?.at ?? ''}`
+  const kept = () => {
+    if (parked && Date.now() - parked.at > KEEP_NOTE_MS) parked = null
+    return parked
+  }
+  /** Whether the pick on the bar shares an element with the kept note. */
+  const resumable = () => Boolean(kept() && shown?.infos.some(item => parked.keys.has(keyOf(item))))
+
   function barParts(status) {
     if (noting !== null) return [{ note: noting }, { act: 'note-done', text: 'Copy' }, { act: 'note-cancel', text: 'Cancel' }]
     const canOpen = Boolean(shown.infos[0].lines[0])
     return [
       { status },
       { sep: true },
-      { act: 'note', text: 'Note' },
+      resumable() ? { act: 'note', text: 'Resume note', on: true } : { act: 'note', text: 'Note' },
       { act: 'shot', text: 'Screenshot' },
       ...(canOpen ? [{ act: 'open', text: 'Open in editor' }] : []),
       { act: 'details', text: details ? 'Details ▴' : 'Details ▾', on: details },
@@ -325,18 +343,69 @@ export function start(options = {}) {
 
   const copiedWords = () => (shown.infos.length > 1 ? `Copied ${shown.infos.length}` : 'Copied')
 
+  /** The last picked element still on the page, for the bar to sit by. */
+  const anchorOf = infos => infos.map(item => item.el).filter(el => el.isConnected).at(-1) ?? infos.at(-1).el
+
   function renderBar(status = copiedWords()) {
     if (!shown) return
-    ui.showBar(shown.infos.at(-1).el, barParts(status))
+    ui.showBar(anchorOf(shown.infos), barParts(status))
     ui.showPanel(details && noting === null ? panelOf(shown) : null, [{ act: 'copy-full', text: 'Copy full' }])
   }
 
-  function closeBar() {
+  // ---- The note: a real textarea that borrows the keyboard, and is kept when it is left ---------------------------
+
+  /** Opens the note's box with these words, the keyboard in it. */
+  function enterNote(words) {
+    const active = document.activeElement
+    returnFocus = active && active !== document.body && !ui.owns(active) ? active : null
+    noting = words
     clearTimeout(barTimer)
+    renderBar()
+    ui.focusNote()
+  }
+
+  /**
+   * THE NOTE ENDS: its words kept with its picks unless it was sent (`keep`), and the keyboard given back where it
+   * was, so a field they were typing in has it again as if it never left.
+   */
+  function leaveNote(keep) {
+    if (noting === null) return null
+    const words = ui.noteValue()
     noting = null
+    if (keep && words.trim()) parked = { infos: shown.infos, note: words, keys: new Set(shown.infos.map(keyOf)), at: Date.now() }
+    const back = returnFocus
+    returnFocus = null
+    if (back?.isConnected) back.focus({ preventScroll: true })
+    else ui.blurNote()
+    return words
+  }
+
+  function hideChip() {
+    clearTimeout(chipTimer)
+    if (!chip) return
+    chip = false
+    ui.hideBar()
+  }
+
+  /** Right after a note was closed unsent: "Note kept", with Resume, for a few seconds by where it was. */
+  function showChip(infos) {
+    chip = true
+    ui.showBar(anchorOf(infos), [{ status: 'Note kept' }, { sep: true }, { act: 'resume', text: 'Resume' }, { act: 'dismiss', text: '×' }])
+    ui.showPanel(null)
+    clearTimeout(chipTimer)
+    chipTimer = setTimeout(hideChip, CHIP_MS)
+  }
+
+  /** The bar goes. A note being typed is kept, and the chip offers it back unless a new pick is what closed it. */
+  function closeBar({ offer = true } = {}) {
+    clearTimeout(barTimer)
+    if (chip) return hideChip()
+    const pick = shown
+    const words = leaveNote(true)
     shown = null
     ui.hideBar()
     ui.marks([])
+    if (offer && pick && words?.trim()) showChip(pick.infos)
   }
 
   /** The bar goes once nothing has happened on it for a while; never while a note is typed or the details are open. */
@@ -346,9 +415,9 @@ export function start(options = {}) {
   }
 
   async function submitNote() {
-    const note = noting.trim()
-    noting = null
+    const note = (leaveNote(false) ?? '').trim()
     if (note) {
+      parked = null
       shown.note = note
       shown.text = build(shown.infos, note)
       const done = await copyText(shown.text)
@@ -406,17 +475,36 @@ export function start(options = {}) {
   }
 
   function act(pressed) {
-    if (!shown || !pressed) return
+    if (!pressed) return
     const { act: name, value } = pressed
+    if (name === 'dismiss') return hideChip()
+    if (name === 'resume') {
+      if (!kept()) return hideChip()
+      hideChip()
+      const { infos, note } = parked
+      parked = null
+      shown = { id: newId(), infos, note: '', text: build(infos) }
+      ui.marks(infos.map(item => item.el).filter(el => el.isConnected))
+      return enterNote(note)
+    }
+    if (!shown) return
     if (name === 'close') return closeBar()
     if (name === 'note') {
-      noting = ''
-      clearTimeout(barTimer)
-      return renderBar()
+      if (!resumable()) return enterNote('')
+      // THE KEPT NOTE COMES BACK WITH ALL ITS PICKS: the ones picked again replace their old selves, the rest join.
+      const fresh = new Map(shown.infos.map(item => [keyOf(item), item]))
+      const merged = parked.infos.map(item => fresh.get(keyOf(item)) ?? item)
+      for (const item of shown.infos) if (!merged.includes(item)) merged.push(item)
+      const { note } = parked
+      parked = null
+      shown.infos = merged
+      shown.text = build(merged)
+      ui.marks(merged.map(item => item.el).filter(el => el.isConnected))
+      return enterNote(note)
     }
     if (name === 'note-done') return submitNote()
     if (name === 'note-cancel') {
-      noting = null
+      leaveNote(true)
       renderBar()
       return holdBar()
     }
@@ -433,25 +521,10 @@ export function start(options = {}) {
     if (name === 'copy-full') return copyFull()
   }
 
-  /** A note is typed here, never in a field: the keys are taken whole, so the app's focused field gets none. */
-  function typeNote(event) {
-    const { key } = event
-    if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(key)) return event.stopImmediatePropagation()
-    // PASTE BRINGS ITS WORDS in its own event, below.
-    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'v') return event.stopImmediatePropagation()
-    stop(event)
-    if (key === 'Enter') return submitNote()
-    if (key === 'Escape') return act({ act: 'note-cancel' })
-    if (key === 'Backspace') noting = event.ctrlKey || event.altKey ? noting.replace(/\s*\S+\s*$/, '') : noting.slice(0, -1)
-    else if (key.length === 1 && !event.ctrlKey && !event.metaKey) noting += key
-    else return
-    renderBar()
-  }
-
   // ---- Picking -----------------------------------------------------------------------------------------------------
 
   async function add(el) {
-    if (!batch.length) closeBar()
+    if (!batch.length) closeBar({ offer: false })
     const index = batch.indexOf(el)
     if (index >= 0) batch.splice(index, 1)
     else batch.push(el)
@@ -516,7 +589,18 @@ export function start(options = {}) {
   }, { capture: true, passive: true })
 
   window.addEventListener('keydown', (event) => {
-    if (noting !== null) return typeNote(event)
+    if (ui.isNote(event)) {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        stop(event)
+        return submitNote()
+      }
+      if (event.key === 'Escape') {
+        stop(event)
+        return act({ act: 'note-cancel' })
+      }
+      // EVERY OTHER KEY TYPES IN THE BOX and reaches nothing in the app: no shortcut of the page acts on it.
+      return event.stopImmediatePropagation()
+    }
     if (event.key === 'Escape' && ui.barOpen()) {
       stop(event)
       return closeBar()
@@ -526,16 +610,24 @@ export function start(options = {}) {
   }, { capture: true })
 
   window.addEventListener('keyup', (event) => {
-    if (noting !== null) return event.stopImmediatePropagation()
+    if (ui.isNote(event)) return event.stopImmediatePropagation()
     follow(event)
   }, { capture: true })
 
-  window.addEventListener('paste', (event) => {
-    if (noting === null) return
-    stop(event)
-    noting += (event.clipboardData?.getData('text/plain') ?? '').replace(/\s+/g, ' ')
-    renderBar()
-  }, { capture: true })
+  // THE NOTE'S OWN EVENTS STAY ITS OWN: typing, pasting, its right-click menu, and the keyboard moving in and out of it
+  // (a modal's focus trap or outside-focus handler would take the keyboard back, or close itself).
+  for (const type of ['keypress', 'beforeinput', 'input', 'paste', 'cut', 'copy', 'compositionstart', 'compositionupdate', 'compositionend', 'contextmenu']) {
+    window.addEventListener(type, (event) => {
+      if (!ui.isNote(event)) return
+      event.stopImmediatePropagation()
+      if (type === 'input') ui.fitNote()
+    }, { capture: true })
+  }
+  for (const type of ['focusin', 'focusout', 'focus', 'blur']) {
+    window.addEventListener(type, (event) => {
+      if (ui.owns(event.target) || ui.owns(event.relatedTarget)) event.stopImmediatePropagation()
+    }, { capture: true })
+  }
 
   window.addEventListener('blur', () => {
     ui.hover(null)
@@ -547,12 +639,15 @@ export function start(options = {}) {
   // pick takes the whole press, so no text is selected and no button, link or row acts on it.
   for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
     window.addEventListener(type, (event) => {
+      // IN THE NOTE'S BOX A PRESS PLACES THE CARET AND SELECTS, as in any box: kept from the app, not from the box.
+      if (ui.isNote(event)) return event.stopImmediatePropagation()
       if (ui.owns(event.target) || (event.button === 0 && armed(event))) return stop(event)
       if (type === 'pointerdown' && ui.barOpen()) closeBar()
     }, { capture: true })
   }
 
   window.addEventListener('click', (event) => {
+    if (ui.isNote(event)) return event.stopImmediatePropagation()
     if (ui.owns(event.target)) {
       stop(event)
       return act(ui.actOf(event))
