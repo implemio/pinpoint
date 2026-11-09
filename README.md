@@ -28,7 +28,9 @@ teal accent, never the app's colours.
     either the keys or the focus moving, so a modal stays open and a field you were in keeps its place. **A note is never
     lost**: closed without Copy (a press elsewhere, Escape, Cancel, a new pick), it is kept with its picks for 10
     minutes. A chip offers it back right away ("Note kept", Resume), and picking any of those elements again makes the
-    bar's Note a Resume note that brings back the words and the whole set.
+    bar's Note a Resume note that brings back the words and the whole set (Edit note, for one you already copied).
+    **Holding the keys shows which elements have a note**: a dashed outline tagged "note" or "note kept", and the
+    hover card quotes it.
   - **Screenshot**: a PNG of the picked elements, on the clipboard beside the text (where you paste takes the one it
     reads), and kept for the agent.
   - **Open in editor**: the first line, in your editor (below).

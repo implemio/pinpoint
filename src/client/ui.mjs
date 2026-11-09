@@ -26,6 +26,8 @@ const CSS = `
 [hidden] { display: none !important; }
 .box { position: fixed; border: 2px solid var(--pp-accent); border-radius: 4px; pointer-events: none; box-shadow: 0 0 0 1px var(--pp-halo), inset 0 0 0 1px var(--pp-halo); }
 .picked { background: color-mix(in srgb, var(--pp-accent) 12%, transparent); }
+.noted { border-style: dashed; }
+.notetag { position: absolute; right: -2px; bottom: 100%; padding: 0 6px; border-radius: 4px 4px 0 0; background: var(--pp-accent); color: var(--pp-accent-ink); font: 600 10px/1.6 var(--pp-sans); white-space: nowrap; }
 .num { position: absolute; left: -2px; top: -2px; padding: 0 6px; border-radius: 3px 0 4px 0; background: var(--pp-accent); color: var(--pp-accent-ink); font: 600 11px/1.6 var(--pp-mono); }
 .card {
   position: fixed; max-width: min(32rem, calc(100vw - 16px)); padding: 4px 8px; border: 1px solid var(--pp-line); border-radius: 6px;
@@ -74,10 +76,11 @@ export function createUi() {
   host.setAttribute('data-pinpoint', '')
   host.setAttribute('data-v-inspector-ignore', '')
   const root = host.attachShadow({ mode: 'open' })
-  root.innerHTML = `<style>${CSS}</style><div class="box" data-hover hidden></div><div class="card" data-card hidden></div><div data-marks></div><div class="dock" hidden><div class="bar" role="toolbar"></div><div class="panel" hidden></div></div>`
+  root.innerHTML = `<style>${CSS}</style><div class="box" data-hover hidden></div><div class="card" data-card hidden></div><div data-noted></div><div data-marks></div><div class="dock" hidden><div class="bar" role="toolbar"></div><div class="panel" hidden></div></div>`
   const hoverBox = root.querySelector('[data-hover]')
   const card = root.querySelector('[data-card]')
   const marksLayer = root.querySelector('[data-marks]')
+  const notedLayer = root.querySelector('[data-noted]')
   const dock = root.querySelector('.dock')
   const bar = root.querySelector('.bar')
   const panel = root.querySelector('.panel')
@@ -85,6 +88,7 @@ export function createUi() {
   document.documentElement.append(host)
 
   let marked = []
+  let notedMarks = []
   let anchor = null
   let hovered = null
   /** The note's box while one is typed: a real textarea, so it edits as any does. */
@@ -151,6 +155,7 @@ export function createUi() {
 
   const reposition = () => {
     marked.forEach((el, index) => marksLayer.children[index] && place(marksLayer.children[index], el))
+    notedMarks.forEach((mark, index) => notedLayer.children[index] && place(notedLayer.children[index], mark.el))
     if (hovered && !hoverBox.hidden) place(hoverBox, hovered)
     placeCard()
     placeDock()
@@ -184,6 +189,17 @@ export function createUi() {
         const box = node('div', 'box picked')
         if (elements.length > 1) box.append(node('span', 'num', String(index + 1)))
         place(box, el)
+        return box
+      }))
+    },
+
+    /** A dashed outline and a tag (`{ el, text }`) on every element with a note; none for `[]`. */
+    noted(marks) {
+      notedMarks = marks
+      notedLayer.replaceChildren(...marks.map((mark) => {
+        const box = node('div', 'box noted')
+        box.append(node('span', 'notetag', mark.text))
+        place(box, mark.el)
         return box
       }))
     },

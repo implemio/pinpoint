@@ -216,8 +216,16 @@ export function start(options = {}) {
   let noting = null
   /** Where the keyboard was before the note took it, given back when the note ends. */
   let returnFocus = null
-  /** A note left without Copy, kept with its picks: `{ infos, note, keys, at }`. */
-  let parked = null
+  /**
+   * NOTES FROM THIS TAB, sent or left without Copy, each kept with its picks for a while (`KEEP_NOTE_MS`): `[{ infos,
+   * note, keys, at, sent }]`. Holding the keys marks their elements; picking one again offers the note back.
+   */
+  let notes = []
+  /** The note the chip offers back, the one closed last without Copy. */
+  let lastKept = null
+  /** Whether the notes' marks are drawn, and whether the notes changed since. */
+  let notesShown = false
+  let notesChanged = false
   let chip = false
   let chipTimer
   let details = stored.get(DETAILS_KEY) === 'open'
@@ -292,6 +300,8 @@ export function start(options = {}) {
     if (first) lines.push({ text: first.at.split('/').slice(-2).join('/'), tone: 'accent' })
     else lines.push({ text: item.library ? `no source of yours (drawn at ${item.library.split('/').pop()})` : 'no source of yours', tone: 'muted' })
     if (item.keys.length) lines.push({ text: `i18n ${item.keys[0]}`, tone: 'muted' })
+    const noted = noteFor([item])
+    if (noted) lines.push({ text: `${noted.sent ? 'note' : 'note kept'}: ${short(noted.note, 60)}`, tone: 'accent' })
     return lines
   }
 
@@ -299,12 +309,38 @@ export function start(options = {}) {
 
   /** A pick's identity that outlives a re-render: its words and its first source line. */
   const keyOf = item => `${item.label}|${item.lines[0]?.at ?? ''}`
-  const kept = () => {
-    if (parked && Date.now() - parked.at > KEEP_NOTE_MS) parked = null
-    return parked
+  const liveNotes = () => (notes = notes.filter(entry => Date.now() - entry.at < KEEP_NOTE_MS))
+  /** A note kept with its picks, in place of any note on the same elements. */
+  function keepNote(infos, note, sent) {
+    const keys = new Set(infos.map(keyOf))
+    const entry = { infos, note, keys, at: Date.now(), sent }
+    notes = [...liveNotes().filter(other => ![...other.keys].some(key => keys.has(key))), entry].slice(-12)
+    notesChanged = true
+    return entry
   }
-  /** Whether the pick on the bar shares an element with the kept note. */
-  const resumable = () => Boolean(kept() && shown?.infos.some(item => parked.keys.has(keyOf(item))))
+  function takeNote(entry) {
+    notes = notes.filter(other => other !== entry)
+    notesChanged = true
+  }
+  /** The newest note sharing an element with these picks (or with this one element). */
+  const noteFor = items => liveNotes().findLast(entry => items.some(item => entry.keys.has(keyOf(item))))
+
+  /** While the keys are held, every element with a note wears a dashed outline and says so. */
+  function markNotes(on) {
+    if (!on) {
+      if (notesShown) ui.noted([])
+      notesShown = false
+      return
+    }
+    if (notesShown && !notesChanged) return
+    const marks = []
+    for (const entry of liveNotes()) {
+      for (const item of entry.infos) if (item.el.isConnected) marks.push({ el: item.el, text: entry.sent ? 'note' : 'note kept' })
+    }
+    ui.noted(marks)
+    notesShown = true
+    notesChanged = false
+  }
 
   function barParts(status) {
     if (noting !== null) return [{ note: noting }, { act: 'note-done', text: 'Copy' }, { act: 'note-cancel', text: 'Cancel' }]
@@ -312,7 +348,10 @@ export function start(options = {}) {
     return [
       { status },
       { sep: true },
-      resumable() ? { act: 'note', text: 'Resume note', on: true } : { act: 'note', text: 'Note' },
+      (() => {
+        const entry = noteFor(shown.infos)
+        return entry ? { act: 'note', text: entry.sent ? 'Edit note' : 'Resume note', on: !entry.sent } : { act: 'note', text: 'Note' }
+      })(),
       { act: 'shot', text: 'Screenshot' },
       ...(canOpen ? [{ act: 'open', text: 'Open in editor' }] : []),
       { act: 'details', text: details ? 'Details ▴' : 'Details ▾', on: details },
@@ -372,7 +411,7 @@ export function start(options = {}) {
     if (noting === null) return null
     const words = ui.noteValue()
     noting = null
-    if (keep && words.trim()) parked = { infos: shown.infos, note: words, keys: new Set(shown.infos.map(keyOf)), at: Date.now() }
+    if (keep && words.trim()) lastKept = keepNote(shown.infos, words, false)
     const back = returnFocus
     returnFocus = null
     if (back?.isConnected) back.focus({ preventScroll: true })
@@ -417,7 +456,8 @@ export function start(options = {}) {
   async function submitNote() {
     const note = (leaveNote(false) ?? '').trim()
     if (note) {
-      parked = null
+      keepNote(shown.infos, note, true)
+      lastKept = null
       shown.note = note
       shown.text = build(shown.infos, note)
       const done = await copyText(shown.text)
@@ -479,10 +519,12 @@ export function start(options = {}) {
     const { act: name, value } = pressed
     if (name === 'dismiss') return hideChip()
     if (name === 'resume') {
-      if (!kept()) return hideChip()
       hideChip()
-      const { infos, note } = parked
-      parked = null
+      const entry = lastKept && liveNotes().includes(lastKept) ? lastKept : null
+      if (!entry) return
+      takeNote(entry)
+      lastKept = null
+      const { infos, note } = entry
       shown = { id: newId(), infos, note: '', text: build(infos) }
       ui.marks(infos.map(item => item.el).filter(el => el.isConnected))
       return enterNote(note)
@@ -490,13 +532,14 @@ export function start(options = {}) {
     if (!shown) return
     if (name === 'close') return closeBar()
     if (name === 'note') {
-      if (!resumable()) return enterNote('')
-      // THE KEPT NOTE COMES BACK WITH ALL ITS PICKS: the ones picked again replace their old selves, the rest join.
+      const entry = noteFor(shown.infos)
+      if (!entry) return enterNote('')
+      // THE NOTE COMES BACK WITH ALL ITS PICKS: the ones picked again replace their old selves, the rest join.
       const fresh = new Map(shown.infos.map(item => [keyOf(item), item]))
-      const merged = parked.infos.map(item => fresh.get(keyOf(item)) ?? item)
+      const merged = entry.infos.map(item => fresh.get(keyOf(item)) ?? item)
       for (const item of shown.infos) if (!merged.includes(item)) merged.push(item)
-      const { note } = parked
-      parked = null
+      const { note } = entry
+      takeNote(entry)
       shown.infos = merged
       shown.text = build(merged)
       ui.marks(merged.map(item => item.el).filter(el => el.isConnected))
@@ -568,10 +611,12 @@ export function start(options = {}) {
   function follow(event) {
     if (!armed(event)) {
       ui.hover(null)
+      markNotes(false)
       carded = null
       if (batch.length) endBatch()
       return
     }
+    markNotes(true)
     if (shortcut) return ui.hover(null)
     const el = document.elementFromPoint(pointer.x, pointer.y)
     if (!el || ui.owns(el)) return ui.hover(null)
@@ -631,6 +676,7 @@ export function start(options = {}) {
 
   window.addEventListener('blur', () => {
     ui.hover(null)
+    markNotes(false)
     carded = null
     if (batch.length) endBatch()
   })
