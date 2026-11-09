@@ -15,10 +15,10 @@ export const defaults = Object.freeze({
   skip: ['node_modules/'],
   /** The trail of components stops at the first whose file matches (a Nuxt page or layout). */
   stopAt: '(^|/)(pages|layouts)/',
-  /** The bar after a pick: Note, Screenshot, Go to, Details. */
+  /** The bar after a pick: its note box, Screenshot, Go to, Details. */
   bar: true,
-  /** How long the bar stays while nothing happens on it, in milliseconds. */
-  barTimeout: 8000,
+  /** Milliseconds of nothing happening on the bar before it closes by itself; 0, the default, never: it stays until you close it. */
+  barTimeout: 0,
   /** Where the dev server's half listens. */
   endpoint: '/__pinpoint',
 })
@@ -212,9 +212,7 @@ export function start(options = {}) {
   let batch = []
   /** The pick the bar is about: `{ id, elements, infos, note, text }`. */
   let shown = null
-  /** The words a note started with while one is typed (its box holds what is typed since), or null. */
-  let noting = null
-  /** Where the keyboard was before the note took it, given back when the note ends. */
+  /** Where the keyboard was before the note's box took it, given back when the bar closes. */
   let returnFocus = null
   /**
    * NOTES FROM THIS TAB, sent or left without Copy, each kept with its picks for a while (`KEEP_NOTE_MS`): `[{ infos,
@@ -343,17 +341,10 @@ export function start(options = {}) {
   }
 
   function barParts(status) {
-    if (noting !== null) return [{ note: noting }, { act: 'note-done', text: 'Copy' }, { act: 'note-cancel', text: 'Cancel' }]
     const canOpen = Boolean(shown.infos[0].lines[0])
     return [
       { status },
       { sep: true },
-      ...(() => {
-        const entry = noteFor(shown.infos)
-        if (!entry) return [{ act: 'note', text: 'Note' }]
-        // A KEPT NOTE IS CLEARED BY HAND with the small bin before it (an x already closes the bar), its marks going with it.
-        return [{ act: 'drop-note', icon: 'trash', small: true, title: 'Clear this note' }, { act: 'note', text: entry.sent ? 'Edit note' : 'Resume note', on: !entry.sent }]
-      })(),
       { act: 'shot', text: 'Screenshot' },
       ...(canOpen ? [{ act: 'open', text: 'Go to', title: 'Open the first source line in your editor' }] : []),
       { act: 'details', text: details ? 'Details ▴' : 'Details ▾', on: details },
@@ -387,37 +378,51 @@ export function start(options = {}) {
   /** The last picked element still on the page, for the bar to sit by. */
   const anchorOf = infos => infos.map(item => item.el).filter(el => el.isConnected).at(-1) ?? infos.at(-1).el
 
-  function renderBar(status = copiedWords()) {
-    if (!shown) return
-    ui.showBar(anchorOf(shown.infos), barParts(status))
-    ui.showPanel(details && noting === null ? panelOf(shown) : null, [{ act: 'copy-full', text: 'Copy full' }])
+  /**
+   * BESIDE THE NOTE'S BOX, a note kept on these elements: Resume note (Edit note for one already copied) brings it back,
+   * and the small bin clears it (an x already closes the bar), its marks going with it.
+   */
+  function noteExtras() {
+    const entry = noteFor(shown.infos)
+    if (!entry) return []
+    const bin = { act: 'drop-note', icon: 'trash', small: true, title: 'Clear this note' }
+    // ONCE THE BOX HOLDS IT, only the bin is left to say: bringing it back again would change nothing.
+    if (ui.noteValue() === entry.note) return [bin]
+    return [{ act: 'take-note', text: entry.sent ? 'Edit note' : 'Resume note', on: !entry.sent }, bin]
   }
 
-  // ---- The note: a real textarea that borrows the keyboard, and is kept when it is left ---------------------------
+  function renderBar(status = copiedWords()) {
+    if (!shown) return
+    ui.showBar(anchorOf(shown.infos), barParts(status), { extras: noteExtras() })
+    ui.showPanel(details ? panelOf(shown) : null, [{ act: 'copy-full', text: 'Copy full' }])
+  }
 
-  /** Opens the note's box with these words, the keyboard in it. */
-  function enterNote(words) {
+  // ---- The note: a box on every bar, ready for words, kept when the bar closes ------------------------------------
+
+  /** The keyboard into the note's box; where it was is remembered as it moves (the focus listeners below). */
+  function openNote() {
     const active = document.activeElement
-    returnFocus = active && active !== document.body && !ui.owns(active) ? active : null
-    noting = words
-    clearTimeout(barTimer)
-    renderBar()
+    if (!returnFocus && active && active !== document.body && !ui.owns(active)) returnFocus = active
     ui.focusNote()
   }
 
+  /** Words typed and not yet copied with the pick: a note in the making. */
+  const unsent = words => Boolean(words.trim()) && words.trim() !== (shown?.note ?? '')
+
   /**
-   * THE NOTE ENDS: its words kept with its picks unless it was sent (`keep`), and the keyboard given back where it
+   * THE BAR'S NOTE ENDS: words not copied yet are kept with the picks (`keep`), and the keyboard goes back where it
    * was, so a field they were typing in has it again as if it never left.
    */
   function leaveNote(keep) {
-    if (noting === null) return null
+    if (!shown) return ''
     const words = ui.noteValue()
-    noting = null
-    if (keep && words.trim()) lastKept = keepNote(shown.infos, words, false)
+    if (keep && unsent(words)) lastKept = keepNote(shown.infos, words, false)
     const back = returnFocus
     returnFocus = null
-    if (back?.isConnected) back.focus({ preventScroll: true })
-    else ui.blurNote()
+    if (ui.noteFocused()) {
+      if (back?.isConnected) back.focus({ preventScroll: true })
+      else ui.blurNote()
+    }
     return words
   }
 
@@ -443,32 +448,34 @@ export function start(options = {}) {
     if (chip) return hideChip()
     const pick = shown
     const words = leaveNote(true)
+    const kept = pick && words.trim() && words.trim() !== (pick.note ?? '')
     shown = null
     ui.hideBar()
     ui.marks([])
-    if (offer && pick && words?.trim()) showChip(pick.infos)
+    if (offer && kept) showChip(pick.infos)
   }
 
-  /** The bar goes once nothing has happened on it for a while; never while a note is typed or the details are open. */
+  /**
+   * THE BAR STAYS UNTIL IT IS CLOSED (Escape, its x, a press elsewhere, a new pick): what was picked stays marked while
+   * they think or ask about it. Only a `barTimeout` set by the app closes it by itself, and never while its note holds
+   * words or the details are open.
+   */
   function holdBar() {
     clearTimeout(barTimer)
-    if (shown && noting === null && !details) barTimer = setTimeout(closeBar, o.barTimeout)
+    if (o.barTimeout > 0 && shown && !details && !ui.noteValue().trim()) barTimer = setTimeout(closeBar, o.barTimeout)
   }
 
+  /** Enter: the block copied again with the note in it. An empty box closes the bar. */
   async function submitNote() {
-    const note = (leaveNote(false) ?? '').trim()
-    if (note) {
-      keepNote(shown.infos, note, true)
-      lastKept = null
-      shown.note = note
-      shown.text = build(shown.infos, note)
-      const done = await copyText(shown.text)
-      remember(shown)
-      renderBar(done ? 'Copied with your note' : 'Could not copy')
-    }
-    else {
-      renderBar()
-    }
+    const note = ui.noteValue().trim()
+    if (!note) return closeBar({ offer: false })
+    keepNote(shown.infos, note, true)
+    lastKept = null
+    shown.note = note
+    shown.text = build(shown.infos, note)
+    const done = await copyText(shown.text)
+    remember(shown)
+    renderBar(done ? 'Copied with your note' : 'Could not copy')
     holdBar()
   }
 
@@ -524,40 +531,41 @@ export function start(options = {}) {
       hideChip()
       const entry = lastKept && liveNotes().includes(lastKept) ? lastKept : null
       if (!entry) return
-      takeNote(entry)
       lastKept = null
       const { infos, note } = entry
       shown = { id: newId(), infos, note: '', text: build(infos) }
       ui.marks(infos.map(item => item.el).filter(el => el.isConnected))
-      return enterNote(note)
+      // THE NOTE STAYS KEPT while it is back in the box: a new copy or another close replaces it, leaving it unchanged
+      // keeps it as it was.
+      ui.setNote(note)
+      renderBar()
+      return openNote()
     }
     if (!shown) return
     if (name === 'close') return closeBar()
-    if (name === 'note') {
+    if (name === 'take-note') {
       const entry = noteFor(shown.infos)
-      if (!entry) return enterNote('')
+      if (!entry) return
       // THE NOTE COMES BACK WITH ALL ITS PICKS: the ones picked again replace their old selves, the rest join.
       const fresh = new Map(shown.infos.map(item => [keyOf(item), item]))
       const merged = entry.infos.map(item => fresh.get(keyOf(item)) ?? item)
       for (const item of shown.infos) if (!merged.includes(item)) merged.push(item)
-      const { note } = entry
-      takeNote(entry)
       shown.infos = merged
       shown.text = build(merged)
+      if (entry.sent) shown.note = entry.note
       ui.marks(merged.map(item => item.el).filter(el => el.isConnected))
-      return enterNote(note)
+      ui.setNote(entry.note)
+      renderBar()
+      clearTimeout(barTimer)
+      return openNote()
     }
     if (name === 'drop-note') {
       const entry = noteFor(shown.infos)
       if (entry) takeNote(entry)
       if (lastKept === entry) lastKept = null
+      if (entry && ui.noteValue() === entry.note) ui.setNote('')
+      if (entry?.sent && shown.note === entry.note) shown.note = ''
       renderBar('Note cleared')
-      return holdBar()
-    }
-    if (name === 'note-done') return submitNote()
-    if (name === 'note-cancel') {
-      leaveNote(true)
-      renderBar()
       return holdBar()
     }
     if (name === 'details') {
@@ -584,11 +592,13 @@ export function start(options = {}) {
     if (!batch.length) return ui.hover(null)
     const text = build(batch.map(info))
     const done = await copyText(text)
+    if (!done) console.info(`[pinpoint]${text}`)
+    // THE KEYS MAY HAVE BEEN LET GO while the copy was on its way: then the bar says it, and no label is left behind.
+    if (!batch.includes(el)) return
     labelHeldUntil = Date.now() + 900
     // THE CARD IS MADE AGAIN once "Copied" has been read, or it would keep saying it.
     carded = null
     ui.hover(el, [{ text: done ? (batch.length > 1 ? `Copied ${batch.length}` : 'Copied') : 'Could not copy, see the console', tone: 'accent' }])
-    if (!done) console.info(`[pinpoint]${text}`)
   }
 
   /** The keys let go: the picks become one, kept for the agent, and the bar opens on it. */
@@ -600,6 +610,9 @@ export function start(options = {}) {
     remember(shown)
     if (o.bar) {
       renderBar()
+      ui.setNote('')
+      // THE NOTE'S BOX IS READY AT ONCE: type, and Enter copies the pick with it.
+      openNote()
       holdBar()
     }
     else {
@@ -650,10 +663,13 @@ export function start(options = {}) {
       }
       if (event.key === 'Escape') {
         stop(event)
-        return act({ act: 'note-cancel' })
+        return closeBar()
       }
-      // EVERY OTHER KEY TYPES IN THE BOX and reaches nothing in the app: no shortcut of the page acts on it.
-      return event.stopImmediatePropagation()
+      // EVERY OTHER KEY TYPES IN THE BOX and reaches nothing in the app: no shortcut of the page acts on it. The keys
+      // held to pick still show the outline, from the box too.
+      event.stopImmediatePropagation()
+      if (MODIFIERS.includes(event.key)) follow(event)
+      return
     }
     if (event.key === 'Escape' && ui.barOpen()) {
       stop(event)
@@ -664,7 +680,7 @@ export function start(options = {}) {
   }, { capture: true })
 
   window.addEventListener('keyup', (event) => {
-    if (ui.isNote(event)) return event.stopImmediatePropagation()
+    if (ui.isNote(event)) event.stopImmediatePropagation()
     follow(event)
   }, { capture: true })
 
@@ -674,12 +690,18 @@ export function start(options = {}) {
     window.addEventListener(type, (event) => {
       if (!ui.isNote(event)) return
       event.stopImmediatePropagation()
-      if (type === 'input') ui.fitNote()
+      if (type !== 'input') return
+      ui.fitNote()
+      // WORDS IN THE BOX KEEP THE BAR: it closes by itself only while the box is empty.
+      holdBar()
     }, { capture: true })
   }
   for (const type of ['focusin', 'focusout', 'focus', 'blur']) {
     window.addEventListener(type, (event) => {
-      if (ui.owns(event.target) || ui.owns(event.relatedTarget)) event.stopImmediatePropagation()
+      if (!ui.owns(event.target) && !ui.owns(event.relatedTarget)) return
+      // WHERE THE KEYBOARD CAME FROM, however it reached the box (a press on it, too), to give it back there.
+      if (type === 'focusin' && ui.owns(event.target) && event.relatedTarget && !ui.owns(event.relatedTarget)) returnFocus ??= event.relatedTarget
+      event.stopImmediatePropagation()
     }, { capture: true })
   }
 

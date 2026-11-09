@@ -7,9 +7,9 @@ export interface PickerOptions {
   skip?: string[]
   /** A regular expression's source: the trail of components stops at the first whose file matches. Default Nuxt's pages and layouts. */
   stopAt?: string
-  /** The bar after a pick (Note, Screenshot, Open in editor). Default true. */
+  /** The bar after a pick: its note box, Screenshot, Go to and Details. Default true. */
   bar?: boolean
-  /** How long the bar stays while nothing happens on it, in milliseconds. Default 8000. */
+  /** Milliseconds of nothing happening on the bar before it closes by itself. Default 0: never, it stays until you close it. */
   barTimeout?: number
   /** Where the dev server's half listens. Default `/__pinpoint`. */
   endpoint?: string

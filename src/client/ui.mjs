@@ -39,9 +39,12 @@ const CSS = `
 .muted { color: var(--pp-muted); }
 .dock { position: fixed; display: flex; flex-direction: column; gap: 4px; max-width: calc(100vw - 16px); pointer-events: auto; }
 .bar {
-  display: flex; align-items: flex-end; gap: 2px; align-self: flex-start; padding: 4px; border: 1px solid var(--pp-line); border-radius: 8px;
+  display: flex; flex-direction: column; gap: 4px; align-self: flex-start; padding: 4px; border: 1px solid var(--pp-line); border-radius: 8px;
   background: var(--pp-surface); color: var(--pp-text); font: 12px/1.4 var(--pp-sans); box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
 }
+.row { display: flex; align-items: center; gap: 2px; }
+.noterow { display: flex; align-items: flex-end; gap: 2px; }
+.extras { display: flex; align-items: center; gap: 2px; }
 .status { padding: 4px 8px; white-space: nowrap; color: var(--pp-accent); }
 .act { padding: 4px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; user-select: none; }
 .act:hover, .act.on { background: var(--pp-raised); }
@@ -50,7 +53,7 @@ const CSS = `
 .act.small:hover { color: var(--pp-text); }
 .sep { width: 1px; align-self: stretch; margin: 2px; background: var(--pp-line); }
 .note {
-  all: unset; display: block; box-sizing: border-box; width: min(28rem, calc(100vw - 160px)); max-height: 40vh; padding: 4px 8px;
+  all: unset; display: block; box-sizing: border-box; flex: 1; min-width: min(24rem, calc(100vw - 48px)); max-height: 40vh; padding: 4px 8px;
   border-radius: 6px; background: var(--pp-raised); color: var(--pp-text); font: 12px/1.45 var(--pp-sans); white-space: pre-wrap;
   overflow-wrap: anywhere; overflow-y: auto; resize: none; caret-color: var(--pp-accent); cursor: text;
 }
@@ -79,13 +82,18 @@ export function createUi() {
   host.setAttribute('data-pinpoint', '')
   host.setAttribute('data-v-inspector-ignore', '')
   const root = host.attachShadow({ mode: 'open' })
-  root.innerHTML = `<style>${CSS}</style><div class="box" data-hover hidden></div><div class="card" data-card hidden></div><div data-noted></div><div data-marks></div><div class="dock" hidden><div class="bar" role="toolbar"></div><div class="panel" hidden></div></div>`
+  root.innerHTML = `<style>${CSS}</style><div class="box" data-hover hidden></div><div class="card" data-card hidden></div><div data-noted></div><div data-marks></div><div class="dock" hidden><div class="bar" role="toolbar"><div class="row"></div><div class="noterow" hidden><textarea class="note" rows="1" spellcheck="true" placeholder="Add a note. Enter copies it with the pick" title="Enter copies the pick with this note, Shift+Enter is a new line, Escape closes"></textarea><span class="extras"></span></div></div><div class="panel" hidden></div></div>`
   const hoverBox = root.querySelector('[data-hover]')
   const card = root.querySelector('[data-card]')
   const marksLayer = root.querySelector('[data-marks]')
   const notedLayer = root.querySelector('[data-noted]')
   const dock = root.querySelector('.dock')
   const bar = root.querySelector('.bar')
+  const row = root.querySelector('.row')
+  const noteRow = root.querySelector('.noterow')
+  /** The note's box: one textarea for as long as the bar is open, so a redraw of the bar keeps its words and focus. */
+  const noteArea = root.querySelector('.note')
+  const extras = root.querySelector('.extras')
   const panel = root.querySelector('.panel')
   // ON <html>, NOT <body>: a transform on the body would make every fixed box inside it relative to the body.
   document.documentElement.append(host)
@@ -94,8 +102,6 @@ export function createUi() {
   let notedMarks = []
   let anchor = null
   let hovered = null
-  /** The note's box while one is typed: a real textarea, so it edits as any does. */
-  let noteArea = null
 
   const node = (tag, className, text) => {
     const el = document.createElement(tag)
@@ -161,7 +167,7 @@ export function createUi() {
 
   /** The note's box as tall as its words, up to 40% of the window, then it scrolls. */
   const fitNote = () => {
-    if (!noteArea) return
+    if (noteRow.hidden) return
     noteArea.style.height = 'auto'
     noteArea.style.height = `${Math.min(noteArea.scrollHeight, innerHeight * 0.4)}px`
     placeDock()
@@ -219,19 +225,15 @@ export function createUi() {
     },
 
     /**
-     * The bar's parts, in order: `{ status }`, `{ sep: true }`, `{ act, text, on }`, or `{ note }` (the note's box,
-     * holding those words; focus it with `focusNote`).
+     * The bar: its first row's parts in order (`{ status }`, `{ sep: true }`, `{ act, text, on, small, icon, title }`)
+     * and, given `note`, the note's row under it: the box (its words kept across redraws) and `note.extras`, parts
+     * beside it.
      */
-    showBar(el, parts) {
+    showBar(el, parts, note = null) {
       if (el) anchor = el
-      noteArea = null
-      bar.replaceChildren(...parts.map((part) => {
+      const draw = (part) => {
         if (part.sep) return node('span', 'sep')
         if (part.status !== undefined) return node('span', 'status', part.status)
-        if (part.note !== undefined) {
-          noteArea = Object.assign(document.createElement('textarea'), { className: 'note', rows: 1, value: part.note, spellcheck: true, placeholder: 'What about it? Enter copies, Shift+Enter is a new line' })
-          return noteArea
-        }
         const button = actable(node('span', ['act', part.on ? 'on' : '', part.small ? 'small' : ''].filter(Boolean).join(' '), part.text), part.act)
         if (part.icon === 'trash') button.append(trashIcon())
         if (part.title) {
@@ -239,23 +241,31 @@ export function createUi() {
           button.setAttribute('aria-label', part.title)
         }
         return button
-      }))
+      }
+      row.replaceChildren(...parts.map(draw))
+      noteRow.hidden = !note
+      extras.replaceChildren(...(note?.extras ?? []).map(draw))
       dock.hidden = false
       placeDock()
       fitNote()
     },
 
-    noteValue: () => noteArea?.value ?? '',
+    setNote(words) {
+      noteArea.value = words
+      fitNote()
+    },
+    noteValue: () => noteArea.value,
     fitNote,
     /** The keyboard into the note, its caret at the end. */
     focusNote() {
-      if (!noteArea) return
+      if (noteRow.hidden) return
       noteArea.focus({ preventScroll: true })
       noteArea.setSelectionRange(noteArea.value.length, noteArea.value.length)
     },
-    blurNote: () => noteArea?.blur(),
+    blurNote: () => noteArea.blur(),
+    noteFocused: () => root.activeElement === noteArea,
     /** Whether an event is the note's own (a key, a press, its input), read off the composed path. */
-    isNote: event => Boolean(noteArea) && event.composedPath().includes(noteArea),
+    isNote: event => !noteRow.hidden && event.composedPath().includes(noteArea),
 
     /**
      * The details panel, or none. `picks` is `[{ head, rows: [{ key, items: [{ text, act, value, tone }] }] }]`; an item
@@ -294,8 +304,9 @@ export function createUi() {
     hideBar() {
       dock.hidden = true
       panel.hidden = true
+      noteRow.hidden = true
+      noteArea.value = ''
       anchor = null
-      noteArea = null
     },
 
     barOpen: () => !dock.hidden,

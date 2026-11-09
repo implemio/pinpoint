@@ -23,13 +23,13 @@ teal accent, never the app's colours.
 - **Click** to pick it. Click more elements while holding the keys to pick several; they are numbered. A click on a
   picked one drops it. The click never reaches the page, so a button or link you pick does not act.
 - **Let go.** The block is already on your clipboard (it is copied at every click), and a bar opens by the element:
-  - **Note**: a box that grows as you type what you want done; Enter copies the block again with `note: ...` inside
-    it, Shift+Enter is a new line. It borrows the keyboard and gives it back where it was, and nothing in the page sees
-    either the keys or the focus moving, so a modal stays open and a field you were in keeps its place. **A note is never
-    lost**: closed without Copy (a press elsewhere, Escape, Cancel, a new pick), it is kept with its picks for 10
-    minutes. A chip offers it back right away ("Note kept", Resume), and picking any of those elements again makes the
-    bar's Note a Resume note that brings back the words and the whole set (Edit note, for one you already copied); the
-    small bin before it clears that note.
+  - **A note box**, under the buttons, with the keyboard already in it: type what you want done, and Enter copies the
+    block again with `note: ...` inside it (Shift+Enter is a new line; Enter on an empty box closes the bar). It grows
+    with your words, borrows the keyboard and gives it back where it was, and nothing in the page sees the keys or the
+    focus moving, so a modal stays open and a field you were in keeps its place. **A note is never lost**: closed before
+    it was copied, it is kept with its picks for 10 minutes. A chip offers it back right away ("Note kept", Resume), and
+    picking any of those elements again puts Resume note (Edit note, for one you already copied) beside the box, which
+    brings back the words and the whole set; the small bin there clears that note.
     **Holding the keys shows which elements have a note**: a dashed outline tagged "note" or "note kept", and the
     hover card quotes it.
   - **Screenshot**: a PNG of the picked elements, on the clipboard beside the text (where you paste takes the one it
@@ -37,7 +37,7 @@ teal accent, never the app's colours.
   - **Go to**: the first source line, in your editor (below).
   - **Details**: unfolds everything read about each pick (below), and stays unfolded for the next pick until you
     fold it.
-  - Escape, a press anywhere else, or 8 seconds of nothing closes it (never while the details are open).
+  - It stays, with your picks marked, until you close it: Escape, its ×, a press anywhere else, or a new pick.
 
 What the block holds:
 
@@ -80,7 +80,7 @@ terminal always works.
 From GitHub, as a dev dependency:
 
 ```bash
-pnpm add -D github:implemio/pinpoint#semver:^0.3.0
+pnpm add -D github:implemio/pinpoint#semver:^0.4.0
 ```
 
 `pnpm update @implemio/pinpoint` then moves to the newest tag in that range.
@@ -131,7 +131,7 @@ Then "make this bigger" is enough: the agent calls `latest_pick` to learn what "
 | `skip` | `['node_modules/']` | A source path holding any of these is not yours. |
 | `stopAt` | `'(^\|/)(pages\|layouts)/'` | A regular expression's source: the trail stops at the first component whose file matches. |
 | `bar` | `true` | The bar after a pick. |
-| `barTimeout` | `8000` | How long the bar stays while nothing happens on it, in milliseconds. |
+| `barTimeout` | `0` | Milliseconds of nothing happening on the bar before it closes by itself; 0 never does. |
 | `endpoint` | `'/__pinpoint'` | Where the dev server's half listens. |
 | `tracer` | `true` | Add `vite-plugin-vue-tracer`, which records each element's source line. Harmless beside Nuxt DevTools' own. |
 | `enabled` | `true` | Nuxt only: off turns the module off. |
