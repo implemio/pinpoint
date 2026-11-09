@@ -28,12 +28,13 @@ teal accent, never the app's colours.
     either the keys or the focus moving, so a modal stays open and a field you were in keeps its place. **A note is never
     lost**: closed without Copy (a press elsewhere, Escape, Cancel, a new pick), it is kept with its picks for 10
     minutes. A chip offers it back right away ("Note kept", Resume), and picking any of those elements again makes the
-    bar's Note a Resume note that brings back the words and the whole set (Edit note, for one you already copied).
+    bar's Note a Resume note that brings back the words and the whole set (Edit note, for one you already copied); the
+    small × before it clears that note.
     **Holding the keys shows which elements have a note**: a dashed outline tagged "note" or "note kept", and the
     hover card quotes it.
   - **Screenshot**: a PNG of the picked elements, on the clipboard beside the text (where you paste takes the one it
     reads), and kept for the agent.
-  - **Open in editor**: the first line, in your editor (below).
+  - **Go to**: the first source line, in your editor (below).
   - **Details**: unfolds everything read about each pick (below), and stays unfolded for the next pick until you
     fold it.
   - Escape, a press anywhere else, or 8 seconds of nothing closes it (never while the details are open).
@@ -66,7 +67,7 @@ Per pick, without pasting it anywhere:
 
 **Copy full** puts all of it in the block; a click still copies the short one.
 
-### Open in editor
+### Go to (the editor)
 
 The dev server runs `LAUNCH_EDITOR` (VS Code's `code` when unset) with the file, line and column. VS Code's command
 reaches its window through the terminal it was started in; a dev server started anywhere else can hold a link that is

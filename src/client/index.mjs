@@ -348,12 +348,14 @@ export function start(options = {}) {
     return [
       { status },
       { sep: true },
-      (() => {
+      ...(() => {
         const entry = noteFor(shown.infos)
-        return entry ? { act: 'note', text: entry.sent ? 'Edit note' : 'Resume note', on: !entry.sent } : { act: 'note', text: 'Note' }
+        if (!entry) return [{ act: 'note', text: 'Note' }]
+        // A KEPT NOTE IS CLEARED BY HAND with the small x before it, its marks going with it.
+        return [{ act: 'drop-note', text: '×', small: true, title: 'Clear this note' }, { act: 'note', text: entry.sent ? 'Edit note' : 'Resume note', on: !entry.sent }]
       })(),
       { act: 'shot', text: 'Screenshot' },
-      ...(canOpen ? [{ act: 'open', text: 'Open in editor' }] : []),
+      ...(canOpen ? [{ act: 'open', text: 'Go to', title: 'Open the first source line in your editor' }] : []),
       { act: 'details', text: details ? 'Details ▴' : 'Details ▾', on: details },
       { act: 'close', text: '×' },
     ]
@@ -544,6 +546,13 @@ export function start(options = {}) {
       shown.text = build(merged)
       ui.marks(merged.map(item => item.el).filter(el => el.isConnected))
       return enterNote(note)
+    }
+    if (name === 'drop-note') {
+      const entry = noteFor(shown.infos)
+      if (entry) takeNote(entry)
+      if (lastKept === entry) lastKept = null
+      renderBar('Note cleared')
+      return holdBar()
     }
     if (name === 'note-done') return submitNote()
     if (name === 'note-cancel') {

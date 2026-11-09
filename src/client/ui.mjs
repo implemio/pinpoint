@@ -45,6 +45,8 @@ const CSS = `
 .status { padding: 4px 8px; white-space: nowrap; color: var(--pp-accent); }
 .act { padding: 4px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; user-select: none; }
 .act:hover, .act.on { background: var(--pp-raised); }
+.act.small { padding: 4px 5px; color: var(--pp-muted); }
+.act.small:hover { color: var(--pp-text); }
 .sep { width: 1px; align-self: stretch; margin: 2px; background: var(--pp-line); }
 .note {
   all: unset; display: block; box-sizing: border-box; width: min(28rem, calc(100vw - 160px)); max-height: 40vh; padding: 4px 8px;
@@ -218,7 +220,12 @@ export function createUi() {
           noteArea = Object.assign(document.createElement('textarea'), { className: 'note', rows: 1, value: part.note, spellcheck: true, placeholder: 'What about it? Enter copies, Shift+Enter is a new line' })
           return noteArea
         }
-        return actable(node('span', `act${part.on ? ' on' : ''}`, part.text), part.act)
+        const button = actable(node('span', ['act', part.on ? 'on' : '', part.small ? 'small' : ''].filter(Boolean).join(' '), part.text), part.act)
+        if (part.title) {
+          button.title = part.title
+          button.setAttribute('aria-label', part.title)
+        }
+        return button
       }))
       dock.hidden = false
       placeDock()
