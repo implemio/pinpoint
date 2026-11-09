@@ -140,16 +140,20 @@ async function shoot(elements) {
   }
   let canvas = shots[0]
   if (shots.length > 1) {
+    // EACH NUMBER IN A GUTTER OF ITS OWN, so it never covers a small element.
     const gap = Math.round(12 * scale)
+    const gutter = Math.round(24 * scale)
     canvas = document.createElement('canvas')
-    canvas.width = Math.max(...shots.map(shot => shot.width))
+    canvas.width = gutter + Math.max(...shots.map(shot => shot.width))
     canvas.height = shots.reduce((sum, shot) => sum + shot.height, 0) + gap * (shots.length - 1)
     const context = canvas.getContext('2d')
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
     let y = 0
     shots.forEach((shot, index) => {
-      context.drawImage(shot, 0, y)
-      context.fillStyle = 'rgba(0, 0, 0, 0.75)'
-      context.fillRect(0, y, 20 * scale, 18 * scale)
+      context.drawImage(shot, gutter, y)
+      context.fillStyle = '#111827'
+      context.fillRect(0, y, gutter - Math.round(4 * scale), Math.round(18 * scale))
       context.fillStyle = '#ffffff'
       context.font = `${12 * scale}px sans-serif`
       context.fillText(String(index + 1), 6 * scale, y + 13 * scale)
