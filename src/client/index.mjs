@@ -205,11 +205,15 @@ export function start(options = {}) {
   const armed = event => needs.size > 0
     && (!needs.has('mod') || event.ctrlKey || event.metaKey)
     && (!needs.has('shift') || event.shiftKey)
-    && needs.has('alt') === event.altKey
+    && (!needs.has('alt') || event.altKey)
+  /** ALT HELD TOO (when the picking keys do not need it) hands the pick to the app instead of the bar. */
+  const handsOff = event => !needs.has('alt') && event.altKey
   const ui = createUi()
 
   /** What is picked while the keys are held. */
   let batch = []
+  /** Whether any click of this batch held Alt as well: the pick goes to the app (`pinpoint:handoff`). */
+  let handOff = false
   /** The pick the bar is about: `{ id, elements, infos, note, text }`. */
   let shown = null
   /** Where the keyboard was before the note's box took it, given back when the bar closes. */
@@ -608,6 +612,15 @@ export function start(options = {}) {
     ui.hover(null)
     shown = { id: newId(), infos, note: '', text: build(infos) }
     remember(shown)
+    const handing = handOff
+    handOff = false
+    // HANDED OFF: the app takes the pick (a bug report opening on it); a listener that calls preventDefault() keeps
+    // the bar away, and with no listener the bar opens as it always does.
+    if (handing && !window.dispatchEvent(new CustomEvent('pinpoint:handoff', { cancelable: true, detail: { ...state.last } }))) {
+      shown = null
+      ui.marks([])
+      return
+    }
     if (o.bar) {
       renderBar()
       ui.setNote('')
@@ -731,6 +744,7 @@ export function start(options = {}) {
     }
     if (event.button !== 0 || !armed(event) || !(event.target instanceof Element)) return
     stop(event)
+    if (handsOff(event)) handOff = true
     void add(event.target)
   }, { capture: true })
 }

@@ -138,6 +138,10 @@ Then "make this bigger" is enough: the agent calls `latest_pick` to learn what "
 
 ## From your app
 
+Hold Alt as well as the picking keys (Ctrl+Shift+Alt+click) to hand the pick to your app instead of the bar: when the
+keys are let go, `window` gets a cancelable `pinpoint:handoff` event whose `detail` is the pick. Call
+`preventDefault()` to keep the bar away; with no listener the bar opens as usual. Not when `modifiers` has `'alt'`.
+
 ```ts
 import { addPickContext, lastPick } from '@implemio/pinpoint/client'
 
