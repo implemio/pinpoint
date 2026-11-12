@@ -643,23 +643,72 @@ export function start(options = {}) {
   /** The element the card was last made for, so crossing one element reads it once. */
   let carded = null
 
+  /**
+   * CLIMBED FROM THE ELEMENT UNDER THE POINTER (ArrowUp or the wheel, keys held): `[under, parent, ...]`, the last one
+   * outlined and picked. It starts over when the pointer reaches another element or the keys are let go.
+   */
+  let climb = []
+  let climbedAt = 0
+  const under = () => {
+    const el = document.elementFromPoint(pointer.x, pointer.y)
+    return el && !ui.owns(el) ? el : null
+  }
+  function target() {
+    const el = under()
+    if (!el) return null
+    if (climb[0] !== el) climb = [el]
+    return climb.at(-1)
+  }
+  const ownWords = el => [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim())
+  /** The nearest ancestor that adds something: a wrapper with the same box and no words of its own is passed over. */
+  function parentOf(el) {
+    const box = el.getBoundingClientRect()
+    for (let up = el.parentElement; up && up !== document.body && up !== document.documentElement; up = up.parentElement) {
+      const r = up.getBoundingClientRect()
+      const same = ['left', 'top', 'right', 'bottom'].every(side => Math.abs(r[side] - box[side]) < 1)
+      if (!same || ownWords(up)) return up
+    }
+    return null
+  }
+  /** One step up (`1`) or back down (`-1`); false when there is nowhere to go. */
+  function step(direction) {
+    const el = target()
+    if (!el) return false
+    if (direction > 0) {
+      const up = parentOf(el)
+      if (!up) return false
+      climb.push(up)
+    }
+    else if (climb.length > 1) climb.pop()
+    else return false
+    carded = null
+    labelHeldUntil = 0
+    return true
+  }
+
   function follow(event) {
     if (!armed(event)) {
       ui.hover(null)
       markNotes(false)
       carded = null
+      climb = []
       if (batch.length) endBatch()
       return
     }
     markNotes(true)
     if (shortcut) return ui.hover(null)
-    const el = document.elementFromPoint(pointer.x, pointer.y)
-    if (!el || ui.owns(el)) return ui.hover(null)
+    const el = target()
+    if (!el) return ui.hover(null)
     if (Date.now() < labelHeldUntil) return ui.hover(el)
     if (el === carded) return ui.hover(el)
     carded = el
-    ui.hover(el, cardOf(el))
+    const card = cardOf(el)
+    if (climb.length > 1) card.push({ text: `↑ ${climb.length - 1} up · ↓ back`, tone: 'muted' })
+    ui.hover(el, card)
   }
+
+  /** ArrowUp/ArrowDown or the wheel, keys held over the page: up to the parent and back. */
+  const climbKey = event => armed(event) && (event.key === 'ArrowUp' || event.key === 'ArrowDown') && under()
 
   window.addEventListener('pointermove', (event) => {
     pointer = { x: event.clientX, y: event.clientY }
@@ -669,6 +718,12 @@ export function start(options = {}) {
   }, { capture: true, passive: true })
 
   window.addEventListener('keydown', (event) => {
+    // BEFORE THE NOTE'S BOX: the box has the keyboard after every pick, and the next pick climbs too.
+    if (climbKey(event)) {
+      stop(event)
+      step(event.key === 'ArrowUp' ? 1 : -1)
+      return follow(event)
+    }
     if (ui.isNote(event)) {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         stop(event)
@@ -718,10 +773,22 @@ export function start(options = {}) {
     }, { capture: true })
   }
 
+  // THE WHEEL, keys held over the page, climbs instead of scrolling or zooming; a trackpad's burst is one step.
+  window.addEventListener('wheel', (event) => {
+    if (!armed(event) || !under()) return
+    stop(event)
+    const delta = event.deltaY || event.deltaX
+    if (!delta || Date.now() - climbedAt < 150) return
+    climbedAt = Date.now()
+    step(delta < 0 ? 1 : -1)
+    follow(event)
+  }, { capture: true, passive: false })
+
   window.addEventListener('blur', () => {
     ui.hover(null)
     markNotes(false)
     carded = null
+    climb = []
     if (batch.length) endBatch()
   })
 
@@ -745,7 +812,8 @@ export function start(options = {}) {
     if (event.button !== 0 || !armed(event) || !(event.target instanceof Element)) return
     stop(event)
     if (handsOff(event)) handOff = true
-    void add(event.target)
+    // CLIMBED: the outlined ancestor is the pick, not the element the click landed on.
+    void add(climb.length > 1 && climb[0] === event.target ? climb.at(-1) : event.target)
   }, { capture: true })
 }
 

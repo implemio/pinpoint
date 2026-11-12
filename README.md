@@ -20,6 +20,9 @@ teal accent, never the app's colours.
 - **Hold Ctrl+Shift** (Cmd+Shift on a Mac): an outline follows the pointer with a card: the element, its size and the
   component part it is (`UPageHero › title`), its first source line, and its translation key. A shortcut you press
   while holding the keys (Ctrl+Shift+Z) hides it until the pointer moves.
+- **ArrowUp or the wheel** (keys still held) moves the outline to the parent element, ArrowDown or the wheel back
+  steps down again; a wrapper with the same box and no words of its own is skipped. The card says how far up it is,
+  and the click picks the outlined element. Moving onto another element starts over.
 - **Click** to pick it. Click more elements while holding the keys to pick several; they are numbered. A click on a
   picked one drops it. The click never reaches the page, so a button or link you pick does not act.
 - **Let go.** The block is already on your clipboard (it is copied at every click), and a bar opens by the element:
